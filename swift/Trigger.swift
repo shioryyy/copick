@@ -31,7 +31,7 @@ final class Trigger {
         guard isEnabled() else { return }
         let p = NSEvent.mouseLocation, now = Date()
         let dist = hypot(p.x - d.p.x, p.y - d.p.y)
-        let near = lastClick.map { now.timeIntervalSince($0.t) < 0.4 && hypot(p.x - $0.p.x, p.y - $0.p.y) < 6 } ?? false
+        let near = lastClick.map { now.timeIntervalSince($0.t) < NSEvent.doubleClickInterval && hypot(p.x - $0.p.x, p.y - $0.p.y) < 6 } ?? false
         clicks = (dist < 8 && near) ? clicks + 1 : 1
         lastClick = (p, now)
 

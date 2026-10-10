@@ -5,7 +5,8 @@ cd "$(dirname "$0")"
 APP=../dist/Copick-swift/Copick.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-swiftc -O -swift-version 5 *.swift -o "$APP/Contents/MacOS/Copick"
+swiftc -O -swift-version 5 -target arm64-apple-macos13.0 *.swift -o "$APP/Contents/MacOS/Copick"
+vtool -show-build "$APP/Contents/MacOS/Copick" | grep -q "minos 13.0" || { echo "部署目标不是 13.0"; exit 1; }
 strip "$APP/Contents/MacOS/Copick"
 cp ../build/icon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp ../build/trayTemplate.png ../build/trayTemplate@2x.png "$APP/Contents/Resources/"

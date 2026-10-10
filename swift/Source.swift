@@ -7,33 +7,60 @@ struct Selection {
     let rect: NSRect?   // Cocoa 坐标；取不到则为 nil
 }
 
+private func attr(_ el: AXUIElement, _ name: String) -> CFTypeRef? {
+    var v: CFTypeRef?
+    return AXUIElementCopyAttributeValue(el, name as CFString, &v) == .success ? v : nil
+}
+
+private func param(_ el: AXUIElement, _ name: String, _ arg: CFTypeRef) -> CFTypeRef? {
+    var v: CFTypeRef?
+    return AXUIElementCopyParameterizedAttributeValue(el, name as CFString, arg, &v) == .success ? v : nil
+}
+
+// 焦点元素：系统级失败时（如 Safari）回退到前台应用级。
+private func focusedElement() -> AXUIElement? {
+    if let f = attr(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute) { return (f as! AXUIElement) }
+    guard let app = NSWorkspace.shared.frontmostApplication,
+          let f = attr(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute) else { return nil }
+    return (f as! AXUIElement)
+}
+
+// 选中文本及其选区矩形（Cocoa 坐标）。依次尝试：SelectedText → StringForRange → WebKit TextMarker。
+private func read(_ el: AXUIElement) -> (String, NSRect?)? {
+    if let s = attr(el, kAXSelectedTextAttribute) as? String, !blank(s) {
+        return (s, selectionRect(el))
+    }
+    if let r = attr(el, kAXSelectedTextRangeAttribute),
+       let s = param(el, kAXStringForRangeParameterizedAttribute, r) as? String, !blank(s) {
+        return (s, selectionRect(el))
+    }
+    if let m = attr(el, "AXSelectedTextMarkerRange"),
+       let s = param(el, "AXStringForTextMarkerRange", m) as? String, !blank(s) {
+        let b = param(el, "AXBoundsForTextMarkerRange", m)
+        return (s, b.flatMap(toCocoa))
+    }
+    return nil
+}
+
+private func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
 // 取词源：只用 Accessibility API，不碰剪贴板。
 func currentSelection() -> Selection? {
-    let sys = AXUIElementCreateSystemWide()
-    var f: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &f) == .success,
-          let focused = f else { return nil }
-    let el = focused as! AXUIElement
-
-    var t: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &t) == .success,
-          let text = t as? String,
-          !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-
+    guard let el = focusedElement(), let (text, rect) = read(el) else { return nil }
     var pid: pid_t = 0
     AXUIElementGetPid(el, &pid)
     let bid = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
-    return Selection(text: text, bundleID: bid, rect: selectionRect(el))
+    return Selection(text: text, bundleID: bid, rect: rect)
 }
 
 private func selectionRect(_ el: AXUIElement) -> NSRect? {
-    var r: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &r) == .success,
-          let range = r else { return nil }
-    var b: CFTypeRef?
-    guard AXUIElementCopyParameterizedAttributeValue(
-        el, kAXBoundsForRangeParameterizedAttribute as CFString, range, &b) == .success,
-          let bv = b else { return nil }
+    guard let range = attr(el, kAXSelectedTextRangeAttribute),
+          let b = param(el, kAXBoundsForRangeParameterizedAttribute, range) else { return nil }
+    return toCocoa(b)
+}
+
+private func toCocoa(_ bv: CFTypeRef) -> NSRect? {
+    guard CFGetTypeID(bv) == AXValueGetTypeID() else { return nil }
     var rect = CGRect.zero
     guard AXValueGetValue(bv as! AXValue, .cgRect, &rect), rect.width > 0 || rect.height > 0 else { return nil }
     // AX 坐标原点在主屏左上，Cocoa 在左下

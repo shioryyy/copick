@@ -19,7 +19,7 @@
 | main | 托盘菜单、开机自启（SMAppService）、单实例检查、串联各模块 |
 
 ## 关键行为
-- 取词只走 AXAPI，不用剪贴板。
+- 取词只走 AXAPI，不用剪贴板。焦点：系统级失败（如 Safari）时回退到前台应用级；文本：`SelectedText` → `StringForRange` → WebKit `AXSelectedTextMarkerRange`。
 - 触发由自己判定，不依赖光标形状。
 - 浮窗位置：有选区矩形时，向下/水平拖选放在选区下方，向上拖选放在上方；无矩形时放在鼠标下方。
 - 坐标：AX 原点在主屏左上，Cocoa 在左下，`Source` 内统一转换。

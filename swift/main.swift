@@ -42,12 +42,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.title = "Copick"
         }
         buildMenu()
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [self] _ in
+            let t = AXIsProcessTrusted()
+            if t != trusted { buildMenu() }
+        }
+    }
+
+    private var trusted = AXIsProcessTrusted()
+
+    @objc private func openAccessibility() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
     private func buildMenu() {
+        trusted = AXIsProcessTrusted()
         let c = config.value
-        item.button?.title = c.paused ? " ⏸" : ""
+        item.button?.title = !trusted ? " ⚠" : c.paused ? " ⏸" : ""
         let m = NSMenu()
+        if !trusted {
+            m.addItem(withTitle: "辅助功能：未授权，划词不会生效", action: nil, keyEquivalent: "").isEnabled = false
+            m.addItem(menuItem("打开辅助功能设置…", #selector(openAccessibility)))
+            m.addItem(.separator())
+        }
         m.addItem(withTitle: c.paused ? "已暂停" : "运行中", action: nil, keyEquivalent: "").isEnabled = false
         m.addItem(menuItem(c.paused ? "恢复划词" : "暂停划词", #selector(togglePause)))
         m.addItem(.separator())
