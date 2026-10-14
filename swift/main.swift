@@ -33,6 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popup.show(at: placePopup(rect: sel.rect, start: start, end: end, size: Popup.size, area: area))
         }
         trigger.start()
+        if let app = NSWorkspace.shared.frontmostApplication { enableAccessibility(app) }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { n in
+            if let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication { enableAccessibility(app) }
+        }
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let url = Bundle.main.url(forResource: "trayTemplate", withExtension: "png"), let img = NSImage(contentsOf: url) {

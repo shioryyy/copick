@@ -42,11 +42,41 @@ private func read(_ el: AXUIElement) -> (String, NSRect?)? {
     return nil
 }
 
+// 先查焦点元素，再沿父链上溯；仍无则从鼠标下的元素起同样处理。
+// 部分 Chromium 应用的选区挂在上层 AXWebArea，而焦点元素是无选区的 AXGroup。
+private func findSelection() -> (AXUIElement, String, NSRect?)? {
+    var starts: [AXUIElement] = []
+    if let f = focusedElement() { starts.append(f) }
+    if let app = NSWorkspace.shared.frontmostApplication {
+        let p = NSEvent.mouseLocation, h = NSScreen.screens[0].frame.height
+        var hit: AXUIElement?
+        if AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier), Float(p.x), Float(h - p.y), &hit) == .success, let hit { starts.append(hit) }
+    }
+    for start in starts {
+        var cur: AXUIElement? = start
+        for _ in 0..<14 {
+            guard let el = cur else { break }
+            if let (t, r) = read(el) { return (el, t, r) }
+            cur = attr(el, kAXParentAttribute).map { $0 as! AXUIElement }
+        }
+    }
+    return nil
+}
+
 private func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+// Chromium / Electron 应用要收到此开关才会构建 AX 树；对其他应用无副作用。
+private var enabledPids = Set<pid_t>()
+func enableAccessibility(_ app: NSRunningApplication) {
+    let pid = app.processIdentifier
+    guard pid != getpid(), enabledPids.insert(pid).inserted else { return }
+    AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility" as CFString, kCFBooleanTrue)
+}
 
 // 取词源：只用 Accessibility API，不碰剪贴板。
 func currentSelection() -> Selection? {
-    guard let el = focusedElement(), let (text, rect) = read(el) else { return nil }
+    if let app = NSWorkspace.shared.frontmostApplication { enableAccessibility(app) }
+    guard let (el, text, rect) = findSelection() else { return nil }
     var pid: pid_t = 0
     AXUIElementGetPid(el, &pid)
     let bid = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""

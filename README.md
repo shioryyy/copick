@@ -34,8 +34,11 @@ swift/build.sh
 | Safari（网页） | ✅ 经 WebKit TextMarker 接口取词 |
 | Edge（网页，含 GitHub、禁止复制的飞书云文档网页） | ✅ |
 | 飞书桌面客户端 | ✅ |
-| Claude 桌面应用 | ⚠️ 偶尔取不到，疑似 Electron 的 AX 树未就绪 |
-| Chrome、Firefox、终端类 | 未验证 |
+| Claude 桌面应用 | ✅ |
+| iTerm2 | ✅ |
+| Chrome、Firefox、Terminal | 未验证 |
+
+Chromium / Electron 应用（Edge、飞书、Claude）刚切到前台时，辅助功能树需要几秒才能建好，此时划词可能没反应，稍等再试。Copick 会对前台应用设置 `AXManualAccessibility` 以触发建树，这是对方应用本身支持的开关，不改动任何设置文件。
 
 取词走辅助功能接口，不受页面「禁止复制」限制，也因此只读取你自己屏幕上选中的文字，不会绕过任何访问控制。
 
