@@ -5,9 +5,11 @@ const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { loadConfig, saveConfig } = require('./config');
 const { PROTECTED, NO_CLIPBOARD, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
+const { createDiagnostics, errorMetadata } = require('./diagnostics');
 
-let hook, popup, settings, tray, config, configFile;
+let hook, popup, settings, tray, config, configFile, diagnostics;
 let current = null, expiry, ready = false, lastProgram = '', failure = null;
+function diag(event, metadata, interval) { if (diagnostics) diagnostics.log(event, metadata, interval); }
 const page = name => path.join(__dirname, `${name}.html`);
 const pageURL = name => pathToFileURL(page(name)).href;
 const preload = path.join(__dirname, 'preload.js');
@@ -46,16 +48,30 @@ function openAccessibilitySettings() {
   if (!isMac) return;
   shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
 }
+const counts = { mouseDown: 0, mouseUp: 0, selections: 0, shown: 0, dropped: 0 };
+function gateState() {
+  return { ready, paused: config?.paused, running: hook?.isRunning(),
+    settingsFocused: Boolean(settings && !settings.isDestroyed() && settings.isFocused()),
+    settingsVisible: Boolean(settings && !settings.isDestroyed() && settings.isVisible()) };
+}
 function applyHook() {
   hidePopup();
   checked(hook.stop());
-  if (!config.paused) checked(hook.start({
+  diag('hook-config', { paused: config.paused, clipboardFallback: config.clipboardFallback,
+    blacklistCount: config.blacklist.length, protectedCount: PROTECTED.length }, 0);
+  if (config.paused) return;
+  // 2.1.1 start() skips values equal to defaults, even after a previous stop().
+  // Explicitly restore clipboard state so false -> true really enables fallback.
+  checked(config.clipboardFallback ? hook.enableClipboard() : hook.disableClipboard());
+  const result = hook.start({
     debug: false, enableMouseMoveEvent: false, enableClipboard: config.clipboardFallback,
     globalFilterMode: hook.constructor.FilterMode.EXCLUDE_LIST,
     globalFilterList: blockedPrograms(config),
     clipboardMode: hook.constructor.FilterMode.EXCLUDE_LIST,
     clipboardFilterList: [...blockedPrograms(config), ...NO_CLIPBOARD]
-  }));
+  });
+  diag('hook-start', { result, running: hook.isRunning() }, 0);
+  checked(result);
 }
 function updateConfig(next) {
   // Stop before changing policy, so a new blacklist never waits behind a running hook.
@@ -66,6 +82,7 @@ function updateConfig(next) {
     failure = null;
     applyHook();
   } catch (error) {
+    diag('hook-config-error', errorMetadata(error));
     config = { ...config, paused: true, clipboardFallback: false };
     failure = error.message;
     publish();
@@ -109,6 +126,7 @@ function rebuildTray() {
       enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
       click: () => safeUpdate({ ...config, blacklist: [...config.blacklist, lastProgram.toLowerCase()] }) },
     { label: '设置与应用黑名单…', click: showSettings },
+    { label: '打开诊断日志目录…', click: () => { shell.openPath(app.getPath('logs')).catch(() => {}); } },
     { type: 'separator' },
     { label: '退出 Copick', click: () => app.quit() }
   ]));
@@ -142,9 +160,18 @@ function installIPC() {
   });
 }
 function showSelection(data) {
-  if (!ready || config.paused || isBlocked(data.programName, config) ||
-      typeof data.text !== 'string' || !data.text.trim() || data.text.length > 1024 * 1024 ||
-      (settings && !settings.isDestroyed() && settings.isFocused())) return;
+  counts.selections++;
+  const metadata = { ...gateState(), textLength: typeof data?.text === 'string' ? data.text.length : 0,
+    programKnown: Boolean(data?.programName), method: data?.method, posLevel: data?.posLevel,
+    mousePointValid: Boolean(validPoint(data?.mousePosEnd)), selectionPointValid: Boolean(validPoint(data?.endBottom)) };
+  diag('selection', metadata);
+  const drop = reason => { counts.dropped++; diag('selection-drop', { ...metadata, reason }); };
+  if (!ready) return drop('popup-not-ready');
+  if (config.paused) return drop('paused');
+  if (!data || isBlocked(data.programName, config)) return drop(data?.programName ? 'blocked-program' : 'unknown-program');
+  if (typeof data.text !== 'string' || !data.text.trim()) return drop('empty-text');
+  if (data.text.length > 1024 * 1024) return drop('text-too-long');
+  if (metadata.settingsFocused) return drop('settings-focused');
   // Hook coordinates are physical pixels; Electron window bounds use DIP on Windows.
   const raw = data.posLevel >= hook.constructor.PositionLevel.SEL_FULL && validPoint(data.endBottom)
     ? data.endBottom : data.mousePosEnd;
@@ -153,13 +180,16 @@ function showSelection(data) {
   if (validPoint(data.mousePosEnd)) {
     const end = pointInDip(data.mousePosEnd);
     // Discard slow results if the pointer has already left the selection.
-    if (end && Math.hypot(end.x - cursor.x, end.y - cursor.y) > 100) return;
+    metadata.cursorDistance = end ? Math.hypot(end.x - cursor.x, end.y - cursor.y) : null;
+    if (end && metadata.cursorDistance > 100) return drop('cursor-moved');
   }
   lastProgram = data.programName;
   current = { text: data.text, program: data.programName, token: randomUUID(), expires: Date.now() + 7000 };
   popup.setBounds(popupBounds(point, screen.getDisplayNearestPoint(point).workArea));
   popup.webContents.send('popup:selection', current.token);
   popup.showInactive();
+  counts.shown++;
+  diag('selection-shown', metadata);
   clearTimeout(expiry);
   expiry = setTimeout(hidePopup, 7000);
   publish();
@@ -178,9 +208,13 @@ if (!isMac && !isWindows) {
   app.on('window-all-closed', () => {});
   app.on('before-quit', () => { hidePopup(); if (hook) hook.cleanup(); if (tray) tray.destroy(); });
   app.whenReady().then(() => {
+    diagnostics = createDiagnostics(app.getPath('logs'));
+    diag('startup', { appVersion: app.getVersion(), hookVersion: '2.1.1', electronVersion: process.versions.electron,
+      nodeVersion: process.versions.node, platform: process.platform, arch: process.arch }, 0);
     const SelectionHook = require('selection-hook');
     hook = new SelectionHook();
-    hook.on('error', () => {
+    hook.on('error', error => {
+      diag('hook-error', errorMetadata(error));
       failure = '选区监听发生错误。请暂停后恢复，或重新启动 Copick。';
       hidePopup();
       publish();
@@ -205,8 +239,9 @@ if (!isMac && !isWindows) {
       resizable: false, movable: false, hasShadow: false });
     popup.setAlwaysOnTop(true, 'pop-up-menu');
     popup.loadFile(page('popup'));
-    popup.webContents.on('did-finish-load', () => { ready = true; });
-    popup.webContents.on('render-process-gone', hidePopup);
+    popup.webContents.on('did-finish-load', () => { ready = true; diag('popup-ready', { ready }, 0); });
+    popup.webContents.on('did-fail-load', () => { ready = false; diag('popup-load-error', { ready }, 0); });
+    popup.webContents.on('render-process-gone', () => { ready = false; hidePopup(); diag('popup-renderer-gone', { ready }, 0); });
     installIPC();
     const trayIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', isMac ? 'trayTemplate.png' : 'icon.png'))
       .resize({ width: isMac ? 18 : 32, height: isMac ? 18 : 32 });
@@ -214,7 +249,11 @@ if (!isMac && !isWindows) {
     tray = new Tray(trayIcon);
     tray.on('double-click', showSettings);
     hook.on('text-selection', showSelection);
+    hook.on('mouse-up', () => { counts.mouseUp++; });
+    const heartbeat = setInterval(() => diag('heartbeat', { ...counts, ...gateState() }, 0), 30000);
+    heartbeat.unref();
     hook.on('mouse-down', data => {
+      counts.mouseDown++;
       if (!current) return;
       const point = pointInDip({ x: data.x, y: data.y });
       if (!point) return;
@@ -228,11 +267,14 @@ if (!isMac && !isWindows) {
     if (isMac && !accessibilityState()) {
       failure = '需要辅助功能权限才能监听选区。请在系统设置中允许 Copick。';
     }
+    diag('permissions', { accessibility: accessibilityState(),
+      permissionProbe: isMac ? 'mac-accessibility' : 'windows-no-permission-probe-api' }, 0);
     if (!failure) {
-      try { applyHook(); } catch (error) { failure = error.message; config.paused = true; }
-    }
+      try { applyHook(); } catch (error) { diag('hook-start-error', errorMetadata(error), 0); failure = error.message; config.paused = true; }
+    } else diag('hook-skipped', { reason: 'startup-failure', paused: config.paused }, 0);
     if (failure) showSettings();
-  }).catch(() => {
+  }).catch(error => {
+    diag('startup-error', errorMetadata(error), 0);
     dialog.showErrorBox('Copick 无法启动', isMac
       ? '无法加载本地模块或应用资源。请确认已授予辅助功能权限，并完整解压应用。'
       : '无法加载本地模块或应用资源。请完整解压 Windows x64 便携包后重试。');
