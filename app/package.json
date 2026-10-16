@@ -1,12 +1,14 @@
 {
   "name": "copick-app",
-  "version": "1.0.0",
+  "version": "0.3.0-beta.1",
   "private": true,
   "description": "Local-only cross-platform selection copy utility",
   "author": "Copick contributors",
   "license": "MIT",
   "main": "src/main.js",
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "electron .",
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/policy.js && node --check src/config.js && node --check src/settings.js && node --check src/popup.js",
@@ -15,18 +17,43 @@
     "pack:win": "electron-builder --win --x64 --dir",
     "dist:win": "electron-builder --win zip --x64"
   },
-  "dependencies": { "selection-hook": "2.1.1" },
-  "devDependencies": { "electron": "44.8.0", "electron-builder": "26.15.3" },
+  "dependencies": {
+    "selection-hook": "2.1.1"
+  },
+  "devDependencies": {
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3"
+  },
   "build": {
     "appId": "local.copick.app",
     "productName": "Copick",
-    "directories": { "output": "release" },
-    "files": ["src/**/*", "assets/**/*", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
     "asar": true,
-    "asarUnpack": ["node_modules/selection-hook/prebuilds/**/*"],
+    "asarUnpack": [
+      "node_modules/selection-hook/prebuilds/**/*"
+    ],
     "npmRebuild": false,
-    "mac": { "icon": "assets/icon.icns", "target": ["zip"], "category": "public.app-category.utilities" },
-    "win": { "icon": "assets/icon.ico", "target": ["zip"], "signExecutable": false },
+    "mac": {
+      "icon": "assets/icon.icns",
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "zip"
+      ],
+      "signExecutable": false
+    },
     "artifactName": "Copick-${version}-${os}-${arch}.${ext}"
   }
 }
