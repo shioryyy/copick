@@ -45,4 +45,5 @@ function createDiagnostics(directory, now = Date.now) {
   }
   return { file, log };
 }
-module.exports = { createDiagnostics, errorMetadata };
+function diagnosticsEnabled(args = []) { return args.includes('--diagnostics'); }
+module.exports = { createDiagnostics, errorMetadata, diagnosticsEnabled };

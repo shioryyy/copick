@@ -5,7 +5,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createDiagnostics, errorMetadata } = require('../src/diagnostics');
+const { createDiagnostics, errorMetadata, diagnosticsEnabled } = require('../src/diagnostics');
+
+test('diagnostics are opt-in for this launch only', () => {
+  assert.equal(diagnosticsEnabled(), false);
+  assert.equal(diagnosticsEnabled(['Copick.exe']), false);
+  assert.equal(diagnosticsEnabled(['Copick.exe', '--diagnostics']), true);
+  assert.equal(diagnosticsEnabled(['Copick.exe', '--smoke-test']), false);
+});
 
 function mainHarness() {
   const source = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');

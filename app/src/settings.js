@@ -11,12 +11,20 @@ function render(value, force = false) {
     blacklist.value = value.blacklist.join('\n');
     dirty = false;
   }
-  document.getElementById('status').textContent = value.error || (value.paused ? '已暂停' : '正在监听选区');
-  document.getElementById('protected').textContent = `完全跳过：${value.protectedPrograms.join(' / ')}。仅禁止快捷键回退：${value.noClipboardPrograms.join(' / ')}。`;
-  document.getElementById('recent').textContent = value.lastProgram ? `最近取词应用：${value.lastProgram}` : '还没有取词记录。';
-  document.getElementById('config-path').textContent = `设置保存于 ${value.configPath}`;
+  document.getElementById('status').textContent = [value.error, value.permissionMessage].filter(Boolean).join(' ') ||
+    (value.paused ? '已暂停' : value.running ? '正在监听选区' : '监听未启动');
+  const mac = value.accessibility !== null;
+  document.getElementById('blacklist-help').textContent = mac
+    ? '每行一个应用标识，例如 com.apple.Safari。命中的应用不触发划词。'
+    : '每行一个程序名，例如 example.exe。命中的应用不触发划词。';
+  blacklist.placeholder = mac ? 'com.apple.Safari' : 'example.exe';
+  const recent = document.getElementById('recent');
+  recent.textContent = value.lastProgram ? `最近取词：${value.lastProgram}` : '';
+  recent.hidden = !value.lastProgram;
   const access = document.getElementById('mac-accessibility');
-  if (access) access.hidden = value.accessibility === null || value.accessibility === true;
+  if (access) access.hidden = value.accessibility === null;
+  document.getElementById('accessibility-status').textContent = value.accessibility ? '已授权' : '未授权';
+  document.getElementById('accessibility-help').hidden = value.accessibility !== false;
 }
 document.getElementById('settings').addEventListener('input', () => { dirty = true; message.textContent = '尚未保存'; });
 document.getElementById('settings').addEventListener('submit', async event => {
@@ -34,4 +42,8 @@ document.getElementById('settings').addEventListener('submit', async event => {
 window.copickSettings.onState(value => render(value));
 const accessibilityButton = document.getElementById('open-accessibility');
 if (accessibilityButton) accessibilityButton.addEventListener('click', () => window.copickSettings.openAccessibility());
+const accessibilityCheckButton = document.getElementById('check-accessibility');
+if (accessibilityCheckButton) accessibilityCheckButton.addEventListener('click', () => {
+  window.copickSettings.read().then(value => render(value)).catch(() => { message.textContent = '无法检查权限。'; });
+});
 window.copickSettings.read().then(value => render(value, true)).catch(() => { message.textContent = '无法读取设置，请重启 Copick。'; });

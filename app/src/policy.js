@@ -22,7 +22,9 @@ const PROTECTED = Object.freeze(isMac ? [
 // IDEs may be read through accessibility APIs, but fallback copy can interrupt terminals.
 const NO_CLIPBOARD = Object.freeze(isMac ? [
   'com.microsoft.visual-studio-code',
-  'com.microsoft.VSCode',
+  'com.microsoft.vscode',
+  'com.apple.terminal',
+  'com.googlecode.iterm2',
   'com.todesktop.2305228j7', // Cursor
   'com.exafunction.windsurf'
 ] : ['code.exe', 'code - insiders.exe', 'cursor.exe', 'windsurf.exe']);

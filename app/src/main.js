@@ -4,11 +4,13 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { loadConfig, saveConfig } = require('./config');
-const { PROTECTED, NO_CLIPBOARD, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
-const { createDiagnostics, errorMetadata } = require('./diagnostics');
+const { PROTECTED, NO_CLIPBOARD, validateConfig, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
+const { createDiagnostics, errorMetadata, diagnosticsEnabled } = require('./diagnostics');
 
 let hook, popup, settings, tray, config, configFile, diagnostics;
 let current = null, expiry, ready = false, lastProgram = '', failure = null;
+let permissionGranted = null;
+const permissionMessage = '需要辅助功能权限，选区监听已暂停。请在系统设置中允许 Copick，然后重新检查权限。';
 function diag(event, metadata, interval) { if (diagnostics) diagnostics.log(event, metadata, interval); }
 const page = name => path.join(__dirname, `${name}.html`);
 const pageURL = name => pathToFileURL(page(name)).href;
@@ -24,7 +26,8 @@ function hidePopup() {
 }
 function state() {
   return { ...config, protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
-    accessibility: accessibilityState(), error: failure, configPath: configFile };
+    accessibility: permissionGranted, permissionMessage: permissionGranted === false ? permissionMessage : null,
+    running: Boolean(hook?.isRunning()), error: failure, configPath: configFile };
 }
 function publish() {
   if (settings && !settings.isDestroyed()) settings.webContents.send('settings:state', state());
@@ -44,6 +47,22 @@ function accessibilityState() {
   return isMac && hook && typeof hook.macIsProcessTrusted === 'function'
     ? hook.macIsProcessTrusted() : null;
 }
+function refreshPermissions() {
+  if (!isMac || !hook || !config) return;
+  const granted = accessibilityState();
+  if (granted === permissionGranted) return;
+  permissionGranted = granted;
+  diag('permissions', { accessibility: granted }, 0);
+  try {
+    if (!granted) {
+      hidePopup();
+      if (hook.isRunning()) checked(hook.stop());
+    } else if (!config.paused && !failure) {
+      applyHook();
+    }
+  } catch (error) { failure = error.message; }
+  publish();
+}
 function openAccessibilitySettings() {
   if (!isMac) return;
   shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
@@ -56,10 +75,10 @@ function gateState() {
 }
 function applyHook() {
   hidePopup();
-  checked(hook.stop());
+  if (hook.isRunning()) checked(hook.stop());
   diag('hook-config', { paused: config.paused, clipboardFallback: config.clipboardFallback,
     blacklistCount: config.blacklist.length, protectedCount: PROTECTED.length }, 0);
-  if (config.paused) return;
+  if (config.paused || (isMac && permissionGranted !== true)) return;
   // 2.1.1 start() skips values equal to defaults, even after a previous stop().
   // Explicitly restore clipboard state so false -> true really enables fallback.
   checked(config.clipboardFallback ? hook.enableClipboard() : hook.disableClipboard());
@@ -74,16 +93,18 @@ function applyHook() {
   checked(result);
 }
 function updateConfig(next) {
-  // Stop before changing policy, so a new blacklist never waits behind a running hook.
+  // Reject invalid input and persistence failures before touching the running hook.
+  const validated = validateConfig(next);
+  const saved = saveConfig(configFile, validated);
   hidePopup();
-  checked(hook.stop());
+  config = saved;
+  failure = null;
   try {
-    config = saveConfig(configFile, next);
-    failure = null;
     applyHook();
   } catch (error) {
     diag('hook-config-error', errorMetadata(error));
-    config = { ...config, paused: true, clipboardFallback: false };
+    // Keep the persisted user intent; runtime failure is reported separately.
+    hook.stop();
     failure = error.message;
     publish();
     throw error;
@@ -105,16 +126,22 @@ function secureWindow(options) {
   return window;
 }
 function showSettings() {
+  refreshPermissions();
   hidePopup();
+  if (isMac) app.dock?.show();
   if (settings && !settings.isDestroyed()) { settings.show(); settings.focus(); return; }
-  settings = secureWindow({ width: 540, height: 690, minWidth: 460, minHeight: 580,
+  settings = secureWindow({ width: 500, height: 610, minWidth: 460, minHeight: 540,
     title: 'Copick 设置', backgroundColor: '#f6f8fc', autoHideMenuBar: true });
   settings.loadFile(page('settings'));
-  settings.on('closed', () => { settings = null; });
+  settings.on('focus', refreshPermissions);
+  settings.on('closed', () => {
+    settings = null;
+    if (isMac) app.dock?.hide();
+  });
 }
 function rebuildTray() {
   if (!tray) return;
-  tray.setToolTip(`Copick · ${failure ? '需要检查设置' : config.paused ? '已暂停' : '运行中'}`);
+  tray.setToolTip(`Copick · ${permissionGranted === false ? '需要辅助功能权限' : failure ? '需要检查设置' : config.paused ? '已暂停' : '运行中'}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Copick · 本地划词复制', enabled: false },
     { label: '暂停划词', type: 'checkbox', checked: config.paused,
@@ -126,7 +153,13 @@ function rebuildTray() {
       enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
       click: () => safeUpdate({ ...config, blacklist: [...config.blacklist, lastProgram.toLowerCase()] }) },
     { label: '设置与应用黑名单…', click: showSettings },
-    { label: '打开诊断日志目录…', click: () => { shell.openPath(app.getPath('logs')).catch(() => {}); } },
+    ...(isMac ? [
+      { label: permissionGranted ? '辅助功能权限：已授权' : '辅助功能权限：未授权', enabled: false },
+      { label: '重新检查辅助功能权限', click: refreshPermissions },
+      { label: '打开辅助功能设置…', click: openAccessibilitySettings }
+    ] : []),
+    { label: diagnostics ? '打开诊断日志目录…' : '诊断日志：未开启（--diagnostics）', enabled: Boolean(diagnostics),
+      click: () => { shell.openPath(app.getPath('logs')).catch(() => {}); } },
     { type: 'separator' },
     { label: '退出 Copick', click: () => app.quit() }
   ]));
@@ -138,6 +171,7 @@ function trusted(event, window, name) {
 function installIPC() {
   ipcMain.handle('settings:read', event => {
     if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    refreshPermissions();
     return state();
   });
   ipcMain.handle('settings:save', (event, next) => {
@@ -152,7 +186,8 @@ function installIPC() {
   });
   ipcMain.handle('popup:copy', (event, token) => {
     if (!trusted(event, popup, 'popup') || !current || token !== current.token ||
-        config.paused || Date.now() > current.expires || isBlocked(current.program, config)) return false;
+        config.paused || (isMac && permissionGranted !== true) || !hook.isRunning() || failure ||
+        Date.now() > current.expires || isBlocked(current.program, config)) return false;
     // Native method serializes against fallback clipboard transactions; Electron.writeText does not.
     const success = hook.writeToClipboard(current.text);
     if (success) hidePopup();
@@ -168,6 +203,7 @@ function showSelection(data) {
   const drop = reason => { counts.dropped++; diag('selection-drop', { ...metadata, reason }); };
   if (!ready) return drop('popup-not-ready');
   if (config.paused) return drop('paused');
+  if ((isMac && permissionGranted !== true) || failure || !hook.isRunning()) return drop('not-listening');
   if (!data || isBlocked(data.programName, config)) return drop(data?.programName ? 'blocked-program' : 'unknown-program');
   if (typeof data.text !== 'string' || !data.text.trim()) return drop('empty-text');
   if (data.text.length > 1024 * 1024) return drop('text-too-long');
@@ -204,11 +240,14 @@ if (!isMac && !isWindows) {
   app.setName('Copick');
   if (isWindows) app.setAppUserModelId('local.copick.app');
   app.on('second-instance', () => { if (tray) showSettings(); });
-  app.on('activate', () => { if (tray) showSettings(); });
+  app.on('activate', (_event, hasVisibleWindows) => {
+    // Only reopen from the Dock when no window is visible; popup interaction is not a settings request.
+    if (tray && !hasVisibleWindows && !current && !popup?.isVisible()) showSettings();
+  });
   app.on('window-all-closed', () => {});
   app.on('before-quit', () => { hidePopup(); if (hook) hook.cleanup(); if (tray) tray.destroy(); });
   app.whenReady().then(() => {
-    diagnostics = createDiagnostics(app.getPath('logs'));
+    if (diagnosticsEnabled(process.argv)) diagnostics = createDiagnostics(app.getPath('logs'));
     diag('startup', { appVersion: app.getVersion(), hookVersion: '2.1.1', electronVersion: process.versions.electron,
       nodeVersion: process.versions.node, platform: process.platform, arch: process.arch }, 0);
     const SelectionHook = require('selection-hook');
@@ -238,6 +277,7 @@ if (!isMac && !isWindows) {
       show: false, focusable: false, skipTaskbar: true, alwaysOnTop: true,
       resizable: false, movable: false, hasShadow: false });
     popup.setAlwaysOnTop(true, 'pop-up-menu');
+    if (isMac) popup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     popup.loadFile(page('popup'));
     popup.webContents.on('did-finish-load', () => { ready = true; diag('popup-ready', { ready }, 0); });
     popup.webContents.on('did-fail-load', () => { ready = false; diag('popup-load-error', { ready }, 0); });
@@ -247,13 +287,18 @@ if (!isMac && !isWindows) {
       .resize({ width: isMac ? 18 : 32, height: isMac ? 18 : 32 });
     if (isMac) trayIcon.setTemplateImage(true);
     tray = new Tray(trayIcon);
+    if (isMac) app.dock?.hide();
     tray.on('double-click', showSettings);
+    tray.on('click', refreshPermissions);
+    tray.on('right-click', refreshPermissions);
     hook.on('text-selection', showSelection);
-    hook.on('mouse-up', () => { counts.mouseUp++; });
-    const heartbeat = setInterval(() => diag('heartbeat', { ...counts, ...gateState() }, 0), 30000);
-    heartbeat.unref();
+    if (diagnostics) {
+      hook.on('mouse-up', () => { counts.mouseUp++; });
+      const heartbeat = setInterval(() => diag('heartbeat', { ...counts, ...gateState() }, 0), 30000);
+      heartbeat.unref();
+    }
     hook.on('mouse-down', data => {
-      counts.mouseDown++;
+      if (diagnostics) counts.mouseDown++;
       if (!current) return;
       const point = pointInDip({ x: data.x, y: data.y });
       if (!point) return;
@@ -263,16 +308,18 @@ if (!isMac && !isWindows) {
     });
     hook.on('mouse-wheel', hidePopup);
     hook.on('key-down', hidePopup);
-    rebuildTray();
-    if (isMac && !accessibilityState()) {
-      failure = '需要辅助功能权限才能监听选区。请在系统设置中允许 Copick。';
-    }
-    diag('permissions', { accessibility: accessibilityState(),
+    permissionGranted = accessibilityState();
+    diag('permissions', { accessibility: permissionGranted,
       permissionProbe: isMac ? 'mac-accessibility' : 'windows-no-permission-probe-api' }, 0);
     if (!failure) {
-      try { applyHook(); } catch (error) { diag('hook-start-error', errorMetadata(error), 0); failure = error.message; config.paused = true; }
+      try { applyHook(); } catch (error) { diag('hook-start-error', errorMetadata(error), 0); failure = error.message; }
     } else diag('hook-skipped', { reason: 'startup-failure', paused: config.paused }, 0);
-    if (failure) showSettings();
+    if (isMac) {
+      const permissionTimer = setInterval(refreshPermissions, 2000);
+      permissionTimer.unref();
+    }
+    publish();
+    if (failure || permissionGranted === false) showSettings();
   }).catch(error => {
     diag('startup-error', errorMetadata(error), 0);
     dialog.showErrorBox('Copick 无法启动', isMac

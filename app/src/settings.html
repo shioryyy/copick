@@ -8,15 +8,16 @@
 <form id="settings">
 <label class="toggle"><input id="paused" type="checkbox"><span>暂停划词</span></label>
 <label class="toggle"><input id="fallback" type="checkbox"><span>启用快捷键回退</span></label>
-<p class="help">取词失败时尝试快捷键回退（Windows 使用 Ctrl+Insert / Ctrl+C，macOS 使用 ⌘C）。会临时改动剪贴板，并尽力还原；特殊格式和同时发生的复制操作可能无法完整还原。</p>
+<p class="help">取词失败时模拟复制，会临时改动剪贴板，也可能被剪贴板历史记录。</p>
 <section><h2><label for="blacklist">应用黑名单</label></h2>
-<p class="help">Windows 每行一个程序文件名，例如 example.exe；macOS 每行一个 bundle identifier，例如 com.example.App。按标识片段匹配，不区分大小写；命中后完全跳过取词和快捷键回退。</p>
-<textarea id="blacklist" rows="5" spellcheck="false" placeholder="example.exe"></textarea>
+<p id="blacklist-help" class="help"></p>
+<textarea id="blacklist" rows="3" spellcheck="false"></textarea>
 <p id="recent" class="help"></p>
-<details><summary>默认保护的程序</summary><p class="help">常见终端、密码管理器和 Copick 自身完全跳过取词。含集成终端的编辑器只允许直接取词，禁止快捷键回退。清空自定义黑名单不会移除默认保护；改名的程序和未列出的终端请手动加入。</p><p id="protected" class="programs"></p></details>
-<section id="mac-accessibility" hidden><h2>macOS 辅助功能</h2><p class="help">selection-hook 需要辅助功能权限读取其他应用的选区。请在系统设置中允许 Copick，然后重启监听。</p><button id="open-accessibility" type="button">打开辅助功能设置</button></section>
+</section>
+<section id="mac-accessibility" hidden>
+<div class="permission-row"><span>辅助功能：<span id="accessibility-status"></span></span><button id="open-accessibility" class="secondary" type="button">打开设置</button></div>
+<p id="accessibility-help" class="help" hidden>授权后自动恢复监听，无需重启。</p>
 </section>
 <div class="actions"><button type="submit">保存设置</button><span id="message" role="status" aria-live="polite"></span></div>
 </form>
-<footer><p>全本地运行，无 AI、网络请求或遥测。选中文字仅暂存在内存中，不保存历史。</p><p id="config-path"></p></footer>
 </main><script src="settings.js"></script></body></html>
