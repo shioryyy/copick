@@ -1,0 +1,6 @@
+html, body { margin: 0; width: 88px; height: 40px; overflow: hidden; background: transparent; }
+button { width: 88px; height: 40px; border: 1px solid #91b5f0; border-radius: 9px; background: #175bb5; color: #fff; font: 600 14px 'Segoe UI', 'Microsoft YaHei UI', sans-serif; cursor: pointer; user-select: none; }
+button:hover { background: #104990; }
+button:active { background: #0b3974; }
+button:disabled { cursor: wait; }
+button:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }

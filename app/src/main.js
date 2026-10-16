@@ -1,0 +1,241 @@
+'use strict';
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, session, shell } = require('electron');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { randomUUID } = require('node:crypto');
+const { loadConfig, saveConfig } = require('./config');
+const { PROTECTED, NO_CLIPBOARD, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
+
+let hook, popup, settings, tray, config, configFile;
+let current = null, expiry, ready = false, lastProgram = '', failure = null;
+const page = name => path.join(__dirname, `${name}.html`);
+const pageURL = name => pathToFileURL(page(name)).href;
+const preload = path.join(__dirname, 'preload.js');
+const isMac = process.platform === 'darwin';
+const isWindows = process.platform === 'win32';
+const icon = path.join(__dirname, '..', 'assets', isMac ? 'icon.icns' : 'icon.ico');
+
+function hidePopup() {
+  clearTimeout(expiry);
+  current = null;
+  if (popup && !popup.isDestroyed()) popup.hide();
+}
+function state() {
+  return { ...config, protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
+    accessibility: accessibilityState(), error: failure, configPath: configFile };
+}
+function publish() {
+  if (settings && !settings.isDestroyed()) settings.webContents.send('settings:state', state());
+  rebuildTray();
+}
+function checked(result) {
+  if (!result) throw new Error('无法启动或配置选区监听。请暂停后重试，或重新启动 Copick。');
+}
+function pointInDip(point) {
+  if (!validPoint(point)) return null;
+  // selection-hook emits screen pixels. Electron screen coordinates are DIP on Windows;
+  // macOS screen coordinates are already Cocoa points, so only Windows converts them.
+  return isWindows && typeof screen.screenToDipPoint === 'function'
+    ? screen.screenToDipPoint(point) : point;
+}
+function accessibilityState() {
+  return isMac && hook && typeof hook.macIsProcessTrusted === 'function'
+    ? hook.macIsProcessTrusted() : null;
+}
+function openAccessibilitySettings() {
+  if (!isMac) return;
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+}
+function applyHook() {
+  hidePopup();
+  checked(hook.stop());
+  if (!config.paused) checked(hook.start({
+    debug: false, enableMouseMoveEvent: false, enableClipboard: config.clipboardFallback,
+    globalFilterMode: hook.constructor.FilterMode.EXCLUDE_LIST,
+    globalFilterList: blockedPrograms(config),
+    clipboardMode: hook.constructor.FilterMode.EXCLUDE_LIST,
+    clipboardFilterList: [...blockedPrograms(config), ...NO_CLIPBOARD]
+  }));
+}
+function updateConfig(next) {
+  // Stop before changing policy, so a new blacklist never waits behind a running hook.
+  hidePopup();
+  checked(hook.stop());
+  try {
+    config = saveConfig(configFile, next);
+    failure = null;
+    applyHook();
+  } catch (error) {
+    config = { ...config, paused: true, clipboardFallback: false };
+    failure = error.message;
+    publish();
+    throw error;
+  }
+  publish();
+}
+function safeUpdate(next) {
+  try { updateConfig(next); }
+  catch { showSettings(); }
+}
+function secureWindow(options) {
+  const window = new BrowserWindow({ ...options, icon, webPreferences: {
+    preload, contextIsolation: true, sandbox: true, nodeIntegration: false,
+    webSecurity: true, devTools: false, spellcheck: false
+  } });
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('will-attach-webview', event => event.preventDefault());
+  return window;
+}
+function showSettings() {
+  hidePopup();
+  if (settings && !settings.isDestroyed()) { settings.show(); settings.focus(); return; }
+  settings = secureWindow({ width: 540, height: 690, minWidth: 460, minHeight: 580,
+    title: 'Copick 设置', backgroundColor: '#f6f8fc', autoHideMenuBar: true });
+  settings.loadFile(page('settings'));
+  settings.on('closed', () => { settings = null; });
+}
+function rebuildTray() {
+  if (!tray) return;
+  tray.setToolTip(`Copick · ${failure ? '需要检查设置' : config.paused ? '已暂停' : '运行中'}`);
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Copick · 本地划词复制', enabled: false },
+    { label: '暂停划词', type: 'checkbox', checked: config.paused,
+      click: item => safeUpdate({ ...config, paused: item.checked }) },
+    { label: `启用快捷键回退（${isMac ? '⌘C' : 'Ctrl+C'}）`, type: 'checkbox', checked: config.clipboardFallback,
+      click: item => safeUpdate({ ...config, clipboardFallback: item.checked }) },
+    { type: 'separator' },
+    { label: lastProgram ? `禁用最近取词应用：${lastProgram}` : '禁用最近取词应用',
+      enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
+      click: () => safeUpdate({ ...config, blacklist: [...config.blacklist, lastProgram.toLowerCase()] }) },
+    { label: '设置与应用黑名单…', click: showSettings },
+    { type: 'separator' },
+    { label: '退出 Copick', click: () => app.quit() }
+  ]));
+}
+function trusted(event, window, name) {
+  return window && !window.isDestroyed() && event.sender === window.webContents &&
+    event.senderFrame === window.webContents.mainFrame && event.senderFrame.url === pageURL(name);
+}
+function installIPC() {
+  ipcMain.handle('settings:read', event => {
+    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    return state();
+  });
+  ipcMain.handle('settings:save', (event, next) => {
+    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    try { updateConfig(next); return { ok: true, state: state() }; }
+    catch (error) { return { ok: false, error: error.message, state: state() }; }
+  });
+  ipcMain.handle('settings:open-accessibility', event => {
+    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    openAccessibilitySettings();
+    return true;
+  });
+  ipcMain.handle('popup:copy', (event, token) => {
+    if (!trusted(event, popup, 'popup') || !current || token !== current.token ||
+        config.paused || Date.now() > current.expires || isBlocked(current.program, config)) return false;
+    // Native method serializes against fallback clipboard transactions; Electron.writeText does not.
+    const success = hook.writeToClipboard(current.text);
+    if (success) hidePopup();
+    return success;
+  });
+}
+function showSelection(data) {
+  if (!ready || config.paused || isBlocked(data.programName, config) ||
+      typeof data.text !== 'string' || !data.text.trim() || data.text.length > 1024 * 1024 ||
+      (settings && !settings.isDestroyed() && settings.isFocused())) return;
+  // Hook coordinates are physical pixels; Electron window bounds use DIP on Windows.
+  const raw = data.posLevel >= hook.constructor.PositionLevel.SEL_FULL && validPoint(data.endBottom)
+    ? data.endBottom : data.mousePosEnd;
+  const cursor = screen.getCursorScreenPoint();
+  const point = pointInDip(raw) || cursor;
+  if (validPoint(data.mousePosEnd)) {
+    const end = pointInDip(data.mousePosEnd);
+    // Discard slow results if the pointer has already left the selection.
+    if (end && Math.hypot(end.x - cursor.x, end.y - cursor.y) > 100) return;
+  }
+  lastProgram = data.programName;
+  current = { text: data.text, program: data.programName, token: randomUUID(), expires: Date.now() + 7000 };
+  popup.setBounds(popupBounds(point, screen.getDisplayNearestPoint(point).workArea));
+  popup.webContents.send('popup:selection', current.token);
+  popup.showInactive();
+  clearTimeout(expiry);
+  expiry = setTimeout(hidePopup, 7000);
+  publish();
+}
+
+if (!isMac && !isWindows) {
+  console.error('Copick supports macOS and Windows only.');
+  app.exit(1);
+} else if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.setName('Copick');
+  if (isWindows) app.setAppUserModelId('local.copick.app');
+  app.on('second-instance', () => { if (tray) showSettings(); });
+  app.on('activate', () => { if (tray) showSettings(); });
+  app.on('window-all-closed', () => {});
+  app.on('before-quit', () => { hidePopup(); if (hook) hook.cleanup(); if (tray) tray.destroy(); });
+  app.whenReady().then(() => {
+    const SelectionHook = require('selection-hook');
+    hook = new SelectionHook();
+    hook.on('error', () => {
+      failure = '选区监听发生错误。请暂停后恢复，或重新启动 Copick。';
+      hidePopup();
+      publish();
+    });
+    if (process.argv.includes('--smoke-test')) {
+      // No hooks or synthetic keys: load the bundled native module only.
+      console.log('COPICK_SMOKE_OK selection-hook=2.1.1 native module loaded');
+      app.quit();
+      return;
+    }
+    configFile = path.join(app.getPath('userData'), 'config.json');
+    const loaded = loadConfig(configFile);
+    config = loaded.config;
+    failure = loaded.error;
+    session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      callback({ cancel: !details.url.startsWith('file://') });
+    });
+    popup = secureWindow({ width: 88, height: 40, frame: false, transparent: true,
+      show: false, focusable: false, skipTaskbar: true, alwaysOnTop: true,
+      resizable: false, movable: false, hasShadow: false });
+    popup.setAlwaysOnTop(true, 'pop-up-menu');
+    popup.loadFile(page('popup'));
+    popup.webContents.on('did-finish-load', () => { ready = true; });
+    popup.webContents.on('render-process-gone', hidePopup);
+    installIPC();
+    const trayIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', isMac ? 'trayTemplate.png' : 'icon.png'))
+      .resize({ width: isMac ? 18 : 32, height: isMac ? 18 : 32 });
+    if (isMac) trayIcon.setTemplateImage(true);
+    tray = new Tray(trayIcon);
+    tray.on('double-click', showSettings);
+    hook.on('text-selection', showSelection);
+    hook.on('mouse-down', data => {
+      if (!current) return;
+      const point = pointInDip({ x: data.x, y: data.y });
+      if (!point) return;
+      const bounds = popup.getBounds();
+      if (point.x < bounds.x || point.x >= bounds.x + bounds.width ||
+          point.y < bounds.y || point.y >= bounds.y + bounds.height) hidePopup();
+    });
+    hook.on('mouse-wheel', hidePopup);
+    hook.on('key-down', hidePopup);
+    rebuildTray();
+    if (isMac && !accessibilityState()) {
+      failure = '需要辅助功能权限才能监听选区。请在系统设置中允许 Copick。';
+    }
+    if (!failure) {
+      try { applyHook(); } catch (error) { failure = error.message; config.paused = true; }
+    }
+    if (failure) showSettings();
+  }).catch(() => {
+    dialog.showErrorBox('Copick 无法启动', isMac
+      ? '无法加载本地模块或应用资源。请确认已授予辅助功能权限，并完整解压应用。'
+      : '无法加载本地模块或应用资源。请完整解压 Windows x64 便携包后重试。');
+    app.exit(1);
+  });
+}

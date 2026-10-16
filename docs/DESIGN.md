@@ -1,32 +1,30 @@
 # Copick 设计
 
-选中文字，点击即复制。macOS 原生，纯本地，无网络，无 AI。
+## 主路线
 
-## 范围
-- 仅 macOS，Swift 原生，无第三方依赖。
-- 不做：AI、翻译等联网动作；`⌘C` 剪贴板回退（取词失败的应用暂不支持）。
-- 历史：早期用 Electron + selection-hook 验证过可行性（飞书支持 AXAPI 取词，selection-hook 的 I-beam 判断会漏触发），随后用 Swift 重写并删除了 Electron 版。
+`app/` 是唯一的跨平台 Electron 主路线：主进程统一负责 selection-hook 生命周期、浮窗、托盘、设置、配置和 IPC；平台差异集中在策略标识、权限提示、坐标单位、图标和打包目标。当前目标是 macOS arm64 与 Windows x64，不引入框架、sidecar、安装器或 updater。
 
-## 模块（swift/）
-| 文件 | 职责 |
-|---|---|
-| Source | AXAPI 取选中文本、所属应用、选区矩形 |
-| Trigger | 判定「选择完成」：拖选（≥8pt）、双击/三击、Shift+点击；滚轮/按键/点击别处取消 |
-| Filter | bundle id 黑/白名单，内置黑名单 |
-| Anchor | 纯函数：选区矩形 + 拖动方向 → 浮窗位置，限制在当前屏幕可见区域内 |
-| Popup | 非激活 NSPanel，不抢焦点，全屏/所有桌面可见 |
-| Config | `Application Support/Copick/config.json`：`mode` / `list` / `paused` |
-| main | 托盘菜单、开机自启（SMAppService）、单实例检查、串联各模块 |
+`swift/` 是保留的 macOS 原生过渡验证实现。它用于对照 AXAPI 和交互行为，保持可构建但不再代表 Electron 主路线；不修改已安装的 Applications app，也不删除该目录。
 
-## 关键行为
-- 取词只走 AXAPI，不用剪贴板。焦点：系统级失败（如 Safari）时回退到前台应用级；选区所在元素：焦点元素 → 沿父链上溯 → 鼠标下元素及其父链（Chromium 的选区常挂在 `AXWebArea`）；对前台应用设置 `AXManualAccessibility`（返回错误码也会触发建树）；文本：`SelectedText` → `StringForRange` → WebKit `AXSelectedTextMarkerRange`。
-- 触发由自己判定，不依赖光标形状。
-- 浮窗位置：有选区矩形时，向下/水平拖选放在选区下方，向上拖选放在上方；无矩形时放在鼠标下方。
-- 坐标：AX 原点在主屏左上，Cocoa 在左下，`Source` 内统一转换。
+## selection-hook 2.1.1 契约
 
-## 安全
-- 无任何网络 API 调用；无第三方依赖，只链接系统框架。
-- 全局监听为只读的 `NSEvent` 全局监视器。
+- macOS 原生 `GetProgramNameFromFrontApp` 取 `NSRunningApplication.bundleIdentifier`，事件中的 `programName` 是 bundle identifier，例如 `com.apple.finder`。
+- Windows 事件中的 `programName` 是可执行程序名，例如 `code.exe`。
+- `TextSelectionData` 和鼠标事件坐标由库声明为 screen pixels。Electron 的窗口 bounds 使用 DIP：Windows 转换为 `screen.screenToDipPoint`；macOS 使用 Cocoa screen points，不转换。
+- macOS 权限使用 `macIsProcessTrusted()` 查询，设置入口打开系统 Accessibility 隐私页。未授权时不启动监听，设置页显示入口。
+- `enableClipboard` 与 `clipboardMode` 只控制回退；直接 AX/UIA 取词仍可用。macOS 默认回退关闭，Windows 默认回退开启；配置可覆盖。
+- `writeToClipboard` 由原生库串行化回退事务，浮窗复制使用它而不是 Electron clipboard API。
 
-## 待办
-- 为 Anchor / Filter 补单测；公证（需 Apple Developer 账号）；`⌘C` 回退（按应用开启）。
+## 策略
+
+平台内置黑名单使用 selection-hook 实际 programName：macOS 使用 bundle identifier，Windows 使用 `.exe` 名称。终端、密码管理器和自身完全跳过；VS Code、Cursor、Windsurf 等 IDE 仅加入 clipboard filter，禁止快捷键回退而保留直接无障碍取词。自定义名单经过平台对应格式校验，按标识片段匹配。
+
+## 浮窗与安全
+
+主进程保留选中文字，渲染器只收到短期 token。浮窗为不抢焦点的置顶窗口；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。
+
+渲染器使用 context isolation、sandbox、无 nodeIntegration；IPC 仅有固定的设置读取/保存、辅助功能入口和 token 复制接口，并校验页面 URL、frame 和 sender。应用无远程内容、网络、遥测和选中文字落盘。
+
+## 验证边界
+
+`npm run check` 和 `npm test` 验证静态语法、平台策略、标识格式、配置失败闭锁和纯坐标函数。`--smoke-test` 只加载 native module，不启动 hook、不发送按键。实际 macOS Accessibility/AX 应用兼容性、Windows 混合 DPI/管理员窗口/焦点保持必须在对应桌面交互测试；本机静态或加载测试不能替代它们。

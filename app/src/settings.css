@@ -1,0 +1,27 @@
+:root { color-scheme: light; font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; color: #25334a; background: #f6f8fc; font-size: 14px; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 620px; margin: auto; padding: 28px 30px; }
+header { border-left: 4px solid #175bb5; padding-left: 16px; margin-bottom: 24px; }
+h1 { font-size: 28px; margin: 0; letter-spacing: -.5px; }
+header p { margin: 6px 0 10px; }
+#status { font-size: 12px; color: #175bb5; }
+h2 { font-size: 16px; margin: 0 0 8px; }
+.toggle { display: flex; gap: 10px; align-items: center; padding: 9px 0; font-weight: 600; cursor: pointer; }
+input { width: 17px; height: 17px; margin: 0; accent-color: #175bb5; }
+.help, footer { color: #53627a; font-size: 12px; line-height: 1.65; }
+.help { margin: 6px 0 12px; }
+section { margin-top: 24px; }
+textarea { display: block; width: 100%; resize: vertical; min-height: 96px; border: 1px solid #bcc9db; border-radius: 5px; padding: 10px; background: #fff; color: #25334a; font: 13px/1.5 Consolas, monospace; }
+summary { cursor: pointer; font-size: 12px; color: #175bb5; }
+.programs { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.actions { display: flex; align-items: center; gap: 14px; margin: 24px 0; }
+button { border: 0; border-radius: 5px; padding: 10px 18px; font: 600 13px 'Segoe UI', 'Microsoft YaHei UI', sans-serif; color: #fff; background: #175bb5; cursor: pointer; flex-shrink: 0; }
+button:hover { background: #104990; }
+button:disabled { opacity: .6; cursor: wait; }
+:focus-visible { outline: 2px solid #175bb5; outline-offset: 3px; }
+#message { font-size: 12px; line-height: 1.5; }
+footer { border-top: 1px solid #d8e0ec; padding-top: 10px; }
+footer p { margin: 6px 0; }
+#config-path { overflow-wrap: anywhere; font-size: 11px; }
+@media (max-width: 480px) { main { padding: 22px; } }
