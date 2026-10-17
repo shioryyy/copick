@@ -75,6 +75,16 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          # A missing GitHub secret arrives as an empty string, and macOS packaging treats
+          # an empty CSC_LINK as a certificate path (it only checks for null), which fails
+          # the build. Treat empty exactly like absent.
+          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK
+          [ -n "${CSC_KEY_PASSWORD:-}" ] || unset CSC_KEY_PASSWORD
+          [ -n "${WIN_CSC_LINK:-}" ] || unset WIN_CSC_LINK
+          [ -n "${WIN_CSC_KEY_PASSWORD:-}" ] || unset WIN_CSC_KEY_PASSWORD
+          [ -n "${APPLE_ID:-}" ] || unset APPLE_ID
+          [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || unset APPLE_APP_SPECIFIC_PASSWORD
+          [ -n "${APPLE_TEAM_ID:-}" ] || unset APPLE_TEAM_ID
           if [[ "$RUNNER_OS" == "macOS" && -n "${APPLE_ID:-}" ]]; then
             echo "Apple credentials present: notarization enabled"
             npm run pack:mac -- --config.mac.notarize=true

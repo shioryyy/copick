@@ -6,6 +6,7 @@
 
 - **无凭据**：照常构建并发布未签名产物。Release 说明会提醒 Windows 的 SmartScreen 提示，以及 macOS 未签名时辅助功能授权可能在重新解压后失效。
 - **有凭据**：`Package` 步骤读取下方 Secrets 后自动签名；macOS 在检测到 `APPLE_ID` 时以 `--config.mac.notarize=true` 构建并公证。
+- 缺失的 Secrets 会以空字符串出现在环境变量里，`Package` 步骤会先把空值 unset：macOS 打包把空 `CSC_LINK` 当成证书路径（只判 null，不判空串），不清理会直接失败。
 
 ## Windows 代码签名
 
