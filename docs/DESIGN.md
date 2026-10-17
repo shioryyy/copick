@@ -19,7 +19,7 @@
 
 ## 浮窗与安全
 
-主进程保留选中文字，渲染器只收到短期 token。macOS 浮窗设置 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`，使用不可聚焦窗口与 `showInactive()` 避免激活或主动切换 Space；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。
+主进程保留选中文字，渲染器只收到短期 token。macOS 浮窗设置 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`，使用不可聚焦窗口与 `showInactive()` 避免激活或主动切换 Space；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。显示后调用 `moveTop()`，否则源应用自身置顶时浮窗会留在它下面，点击落到源窗口（Windows 真机复现并修复）。
 
 复制前无法通过现有库可靠核验当前前台应用：`index.d.ts` 没有只读身份接口，`MouseEventData` 仅含坐标/按钮；macOS `GetCurrentSelection` 进入 `SelectionEngine::GetSelectedText`，AX 失败会尝试 ⌘C 回退。为保留仅回退取词的复制能力，未采用关闭回退后再次取词的保守拒绝方案。非键鼠触发的前台切换仍可能留下旧 token，需要原生只读前台身份接口才可完整修复。
 
@@ -31,4 +31,4 @@
 
 `npm run check` 和 `npm test` 验证静态语法、平台策略、标识格式、配置失败闭锁和纯坐标函数。`--smoke-test` 只加载 native module，不启动 hook、不发送按键。实际 macOS Accessibility/AX 应用兼容性、Windows 混合 DPI/管理员窗口/焦点保持必须在对应桌面交互测试；本机静态或加载测试不能替代它们。真机结果记录在 `docs/COMPATIBILITY.md`，发版前按其中的用例逐项更新。
 
-IPC 发送方校验比较的是 `fileURLToPath` 解码后的页面路径（Windows 下忽略大小写），而不是 URL 字符串，避免 Chromium 与 Node 对含空格、非 ASCII 字符或盘符大小写的安装路径编码不一致时所有 IPC 静默失败。
+诊断日志记录 IPC 通过（`ipc`，含通道名）与拒绝（`ipc-rejected`）以及浮窗关闭原因（`popup-hidden`：copied、timeout、mouse-down-outside、mouse-wheel、key-down），不含文本。IPC 发送方校验比较的是 `fileURLToPath` 解码后的页面路径（Windows 下忽略大小写），而不是 URL 字符串，避免 Chromium 与 Node 对含空格、非 ASCII 字符或盘符大小写的安装路径编码不一致时所有 IPC 静默失败。

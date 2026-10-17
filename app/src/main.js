@@ -18,8 +18,9 @@ const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const icon = path.join(__dirname, '..', 'assets', isMac ? 'icon.icns' : 'icon.ico');
 
-function hidePopup() {
+function hidePopup(reason = 'internal') {
   clearTimeout(expiry);
+  if (current) diag('popup-hidden', { reason: typeof reason === 'string' ? reason : 'internal' });
   current = null;
   if (popup && !popup.isDestroyed()) popup.hide();
 }
@@ -176,29 +177,34 @@ function trusted(event, window, name) {
   return Boolean(window && !window.isDestroyed() && event.sender === window.webContents &&
     event.senderFrame === window.webContents.mainFrame && samePage(event.senderFrame.url, name));
 }
+function guard(event, window, name, channel) {
+  if (trusted(event, window, name)) { diag('ipc', { channel }); return true; }
+  diag('ipc-rejected', { channel }, 0);
+  return false;
+}
 function installIPC() {
   ipcMain.handle('settings:read', event => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:read')) throw new Error('Invalid sender');
     refreshPermissions();
     return state();
   });
   ipcMain.handle('settings:save', (event, next) => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:save')) throw new Error('Invalid sender');
     try { updateConfig(next); return { ok: true, state: state() }; }
     catch (error) { return { ok: false, error: error.message, state: state() }; }
   });
   ipcMain.handle('settings:open-accessibility', event => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:open-accessibility')) throw new Error('Invalid sender');
     openAccessibilitySettings();
     return true;
   });
   ipcMain.handle('popup:copy', (event, token) => {
-    if (!trusted(event, popup, 'popup') || !current || token !== current.token ||
+    if (!guard(event, popup, 'popup', 'popup:copy') || !current || token !== current.token ||
         config.paused || (isMac && permissionGranted !== true) || !hook.isRunning() || failure ||
         Date.now() > current.expires || isBlocked(current.program, config)) return false;
     // Native method serializes against fallback clipboard transactions; Electron.writeText does not.
     const success = hook.writeToClipboard(current.text);
-    if (success) hidePopup();
+    if (success) hidePopup('copied');
     return success;
   });
 }
@@ -232,10 +238,13 @@ function showSelection(data) {
   popup.setBounds(popupBounds(point, screen.getDisplayNearestPoint(point).workArea));
   popup.webContents.send('popup:selection', current.token);
   popup.showInactive();
+  // Source apps that are themselves always-on-top share the topmost band; without this the
+  // popup can stay underneath them and clicks land on the source window instead.
+  if (typeof popup.moveTop === 'function') popup.moveTop();
   counts.shown++;
   diag('selection-shown', metadata);
   clearTimeout(expiry);
-  expiry = setTimeout(hidePopup, 7000);
+  expiry = setTimeout(() => hidePopup('timeout'), 7000);
   publish();
 }
 
@@ -315,10 +324,10 @@ if (!isMac && !isWindows) {
       if (!point) return;
       const bounds = popup.getBounds();
       if (point.x < bounds.x || point.x >= bounds.x + bounds.width ||
-          point.y < bounds.y || point.y >= bounds.y + bounds.height) hidePopup();
+          point.y < bounds.y || point.y >= bounds.y + bounds.height) hidePopup('mouse-down-outside');
     });
-    hook.on('mouse-wheel', hidePopup);
-    hook.on('key-down', hidePopup);
+    hook.on('mouse-wheel', () => hidePopup('mouse-wheel'));
+    hook.on('key-down', () => hidePopup('key-down'));
     permissionGranted = accessibilityState();
     diag('permissions', { accessibility: permissionGranted,
       permissionProbe: isMac ? 'mac-accessibility' : 'windows-no-permission-probe-api' }, 0);

@@ -41,7 +41,7 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     isDestroyed() { return false; }
     isFocused() { return this.focused; }
     isVisible() { return false; }
-    hide() {} show() {} focus() {} loadFile() {} showInactive() { calls.inactive = true; }
+    hide() {} show() {} focus() {} loadFile() {} showInactive() { calls.inactive = true; } moveTop() { calls.moveTop = (calls.moveTop || 0) + 1; }
     setAlwaysOnTop() {}
     setVisibleOnAllWorkspaces(...args) { calls.workspaces.push(args); }
     setBounds(bounds) { this.bounds = bounds; }

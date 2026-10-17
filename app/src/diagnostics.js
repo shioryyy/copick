@@ -7,7 +7,7 @@ const fields = new Set(['appVersion', 'hookVersion', 'electronVersion', 'nodeVer
   'accessibility', 'permissionProbe', 'paused', 'clipboardFallback', 'blacklistCount', 'protectedCount',
   'result', 'running', 'ready', 'settingsFocused', 'settingsVisible', 'reason', 'textLength', 'programKnown',
   'method', 'posLevel', 'mousePointValid', 'selectionPointValid', 'cursorDistance', 'count', 'suppressed',
-  'mouseDown', 'mouseUp', 'selections', 'shown', 'dropped', 'errorName', 'errorCode', 'errorMessageLength']);
+  'mouseDown', 'mouseUp', 'selections', 'shown', 'dropped', 'errorName', 'errorCode', 'errorMessageLength', 'channel']);
 function errorMetadata(error) {
   return {
     errorName: ['Error', 'TypeError', 'RangeError', 'SyntaxError'].includes(error?.name) ? error.name : 'Error',
