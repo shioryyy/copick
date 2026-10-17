@@ -73,6 +73,7 @@ jobs:
             echo "- **macOS Apple Silicon（arm64）**：下载 \`Copick-$VERSION-mac-arm64.zip\`，解压后将 Copick.app 拖入「应用程序」，在「系统设置 → 隐私与安全性 → 辅助功能」允许 Copick。此包未签名、未公证，系统可能阻止首次启动。"
             echo "- **Windows 11 x64 安装版**：下载 \`Copick-Setup-$VERSION-win-x64.exe\` 运行，按用户安装、不需要管理员权限，可在设置中开启开机自启。未代码签名，会出现 SmartScreen 提示，点「更多信息 → 仍要运行」。"
             echo "- **Windows 11 x64 便携版**：下载 \`Copick-$VERSION-win-x64.zip\`，完整解压到固定目录后运行 \`Copick.exe\`。不能仅复制 EXE；移动目录后需重新开启开机自启。"
+            echo "- 系统要求：macOS 13+（Apple Silicon）或 Windows 11 x64。"
             echo "- 更新前请从托盘退出旧版。\`SHA256SUMS.txt\` 提供全部附件的 SHA-256 校验值。"
             echo "- 兼容性实测结果见 [docs/COMPATIBILITY.md](https://github.com/${GITHUB_REPOSITORY}/blob/v$VERSION/docs/COMPATIBILITY.md)。"
           } > release-body.md

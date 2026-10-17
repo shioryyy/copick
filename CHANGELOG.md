@@ -2,7 +2,7 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。发布流程：更新本文件的对应版本小节，把 `app/package.json` 的 `version` 改成同一版本号，推送 `v<版本号>` tag，`.github/workflows/release.yml` 会构建、校验并创建 GitHub Release；版本号含 `-` 的自动标为 Pre-release。
 
-## [Unreleased]
+## [0.3.0-beta.2] - 2026-10-18
 
 ### 修复
 
@@ -43,5 +43,6 @@
 - 未签名、未公证，无安装器与自动更新。
 - 底层库没有只读前台身份接口，非键鼠触发的前台切换可能在超时前留下旧浮窗。
 
-[Unreleased]: https://github.com/shioryyy/copick/compare/v0.3.0-beta.1...HEAD
+[Unreleased]: https://github.com/shioryyy/copick/compare/v0.3.0-beta.2...HEAD
+[0.3.0-beta.2]: https://github.com/shioryyy/copick/releases/tag/v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/shioryyy/copick/releases/tag/v0.3.0-beta.1
