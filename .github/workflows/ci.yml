@@ -61,9 +61,26 @@ jobs:
           grep -q COPICK_SMOKE_OK smoke.log
 
       - name: Package
-        run: ${{ matrix.pack }}
+        shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Signing activates automatically once these repository secrets exist;
+          # empty secrets keep the unsigned build exactly as before.
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" && -n "${APPLE_ID:-}" ]]; then
+            echo "Apple credentials present: notarization enabled"
+            npm run pack:mac -- --config.mac.notarize=true
+          else
+            ${{ matrix.pack }}
+          fi
 
       - name: Smoke test packaged app
         shell: bash

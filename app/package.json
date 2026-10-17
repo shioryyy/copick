@@ -45,15 +45,17 @@
       "target": [
         "zip"
       ],
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "hardenedRuntime": true
     },
     "win": {
       "icon": "assets/icon.ico",
       "target": [
         "zip",
         "nsis"
-      ],
-      "signExecutable": false
+      ]
     },
     "artifactName": "Copick-${version}-${os}-${arch}.${ext}",
     "nsis": {

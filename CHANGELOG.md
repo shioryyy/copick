@@ -25,6 +25,7 @@
 - GitHub Actions 双平台 CI（macOS arm64、Windows x64）：语法检查、单元测试、开发态与打包产物的原生模块 smoke test、依赖审计。
 - Dependabot 每周检查 npm 与 Actions 依赖，`selection-hook` 需人工升级。
 - `docs/COMPATIBILITY.md` 兼容性矩阵，Windows x64 已有 13 个应用的真机结论。
+- 打包接线代码签名：Windows 提供证书 secret 后自动签名 zip 与 NSIS 产物（已用自签证书验证签名管线）；macOS 预置 hardened runtime 与 entitlements，配置 Apple 凭据后自动公证。凭据与验证方法见 `docs/RELEASE.md`。
 
 ## [0.3.0-beta.1] - 2026-10-16
 
