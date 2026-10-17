@@ -58,18 +58,18 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 
 | 应用 | 程序名 | 取词 | 回退 | 高 DPI | 备注 |
 |---|---|---|---|---|---|
-| Edge | msedge.exe | — | — | — | |
-| Chrome | chrome.exe | — | — | — | |
-| Firefox | firefox.exe | — | — | — | |
-| 记事本 | notepad.exe | — | — | — | Win11 新版为 UWP 容器 |
-| Word | winword.exe | — | — | — | |
-| Excel 单元格 | excel.exe | — | — | — | |
-| Outlook | outlook.exe | — | — | — | |
-| Acrobat Reader | acrord32.exe / acrobat.exe | — | — | — | |
-| Edge PDF | msedge.exe | — | — | — | |
-| 微信 | wechat.exe / weixin.exe | — | — | — | |
-| 飞书 | feishu.exe | — | — | — | Electron |
-| 资源管理器文件名 | explorer.exe | — | — | — | |
+| Edge 网页 | msedge.exe | ✅ 2026-10-18 UIA | — | ✅ 100% | 第一次拖选因鼠标移开过快被丢弃（cursor-moved），第二次 UIA 取词、复制成功 |
+| Chrome | chrome.exe | — | — | — | 测试机未安装 |
+| Firefox | firefox.exe | — | — | — | 测试机未安装 |
+| 记事本 | notepad.exe | ⚠️ 待确认 | ✅ 2026-10-18 | ✅ 100% | 日志推测：走回退（method=99）而非 UIA。若属实，关闭回退后 Win11 记事本取不到词 |
+| Word | winword.exe | ⚠️ 待确认 | ✅ 2026-10-18 | ✅ 100% | 日志推测：走回退 |
+| Excel 单元格 | excel.exe | ✅ 2026-10-18 待确认 | — | ✅ 100% | 日志推测：UIA 取词 |
+| Outlook | outlook.exe | — | — | — | 2026-10-18 未测 |
+| Acrobat Reader | acrord32.exe / acrobat.exe | — | — | — | 2026-10-18 未测 |
+| Edge PDF | msedge.exe | ✅ 2026-10-18 待确认 | — | ✅ 100% | 日志推测：UIA 取词 |
+| 微信 | weixin.exe | ⚠️ 待确认 | ✅ 2026-10-18 | ✅ 100% | 日志推测：走回退 |
+| 飞书 | feishu.exe | — | — | — | Electron；测试机未安装 |
+| 资源管理器文件名 | explorer.exe | ⚠️ 待确认 | ✅ 2026-10-18 | ✅ 100% | 日志推测：走回退 |
 | VS Code 1.132 | code.exe | ⚠️ 2026-10-18 | 禁用 | ✅ 100% | 默认设置下无任何事件：Monaco 编辑器不开放无障碍树（UIA 报 "The editor is not accessible at this time"），而回退被策略禁用。把 `editor.accessibilitySupport` 设为 `on` 后 UIA 取词成功（method=1，posLevel=3），浮窗位置正确。临时配置目录对照实验，两种配置各拖选两次 |
 | 自建 Win32 Edit 测试宿主（见下方说明） | copicktesthost.exe | ❌ UIA 未取到 | ✅ 0.3.0-beta.1 2026-10-17 | ✅ 100% | 通用 6 步全部通过：浮窗位置、复制内容、焦点保持、7 秒超时、点击/滚轮消失、快速移开丢弃。取词走 method=99 回退，说明关闭回退后经典 Win32 Edit 控件取不到词 |
 | Windows Terminal | windowsterminal.exe | ✅ 不触发 2026-10-18 | ✅ 不触发 | — | 平台内置完全黑名单，用户真机确认 |
@@ -99,4 +99,4 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 | 日期 | 平台 | 系统版本 | Copick 版本 | 显示器 / 缩放 | 测试人 |
 |---|---|---|---|---|---|
 | 2026-10-17 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1（打包版与开发态） | 单屏 2560×1440 / 100% | 自动化脚本，鼠标事件由 mouse_event 注入 |
-| 2026-10-18 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1 含 moveTop 修复 | 单屏 2560×1440 / 100% | 用户真鼠标：多款应用共 10 次取词全部复制成功，其中 UIA 4 次、回退 6 次；VS Code 与 Terminal 见各自行 |
+| 2026-10-18 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1 含 moveTop 修复 | 单屏 2560×1440 / 100% | 用户真鼠标按本表顺序测试：10 次弹窗全部复制成功，UIA 4 次、回退 6 次。日志不含程序名，应用对应关系按时间顺序推测，标「待确认」的行需用户校正 |
