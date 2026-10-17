@@ -8,7 +8,7 @@
 <form id="settings">
 <label class="toggle"><input id="paused" type="checkbox"><span>暂停划词</span></label>
 <label class="toggle"><input id="fallback" type="checkbox"><span>启用快捷键回退</span></label>
-<p class="help">取词失败时模拟复制，会临时改动剪贴板，也可能被剪贴板历史记录。</p>
+<p class="help">取词失败时模拟复制，会临时改动剪贴板，也可能被剪贴板历史记录。终端和 VS Code 等编辑器始终不使用回退；VS Code 需把 editor.accessibilitySupport 设为 on 才能取词。</p>
 <section><h2><label for="blacklist">应用黑名单</label></h2>
 <p id="blacklist-help" class="help"></p>
 <textarea id="blacklist" rows="3" spellcheck="false"></textarea>

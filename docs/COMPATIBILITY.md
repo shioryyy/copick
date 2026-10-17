@@ -70,9 +70,9 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 | 微信 | wechat.exe / weixin.exe | — | — | — | |
 | 飞书 | feishu.exe | — | — | — | Electron |
 | 资源管理器文件名 | explorer.exe | — | — | — | |
-| VS Code | code.exe | — | 禁用 | — | 平台内置禁止回退 |
-| 自建 Win32 Edit 测试宿主 | copicktesthost.exe | ❌ UIA 未取到 | ✅ 0.3.0-beta.1 2026-10-17 | ✅ 100% | 通用 6 步全部通过：浮窗位置、复制内容、焦点保持、7 秒超时、点击/滚轮消失、快速移开丢弃。取词走 method=99 回退，说明关闭回退后经典 Win32 Edit 控件取不到词 |
-| Windows Terminal | windowsterminal.exe | 应不触发 | 应不触发 | — | 平台内置完全黑名单 |
+| VS Code 1.132 | code.exe | ⚠️ 2026-10-18 | 禁用 | ✅ 100% | 默认设置下无任何事件：Monaco 编辑器不开放无障碍树（UIA 报 "The editor is not accessible at this time"），而回退被策略禁用。把 `editor.accessibilitySupport` 设为 `on` 后 UIA 取词成功（method=1，posLevel=3），浮窗位置正确。临时配置目录对照实验，两种配置各拖选两次 |
+| 自建 Win32 Edit 测试宿主（见下方说明） | copicktesthost.exe | ❌ UIA 未取到 | ✅ 0.3.0-beta.1 2026-10-17 | ✅ 100% | 通用 6 步全部通过：浮窗位置、复制内容、焦点保持、7 秒超时、点击/滚轮消失、快速移开丢弃。取词走 method=99 回退，说明关闭回退后经典 Win32 Edit 控件取不到词 |
+| Windows Terminal | windowsterminal.exe | ✅ 不触发 2026-10-18 | ✅ 不触发 | — | 平台内置完全黑名单，用户真机确认 |
 | 1Password | 1password.exe | 应不触发 | 应不触发 | — | 平台内置完全黑名单 |
 
 ### Windows 系统级用例
@@ -90,8 +90,13 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 | SmartScreen 对未签名 ZIP 的提示文案 | — | 记录以便写用户指引 |
 | 剪贴板历史（Win+V）开启时回退是否留下记录 | — | README 已说明可能发生 |
 
+## 关于「自建 Win32 Edit 测试宿主」
+
+这不是真实应用，而是一个几十行的 WinForms 程序（一个窗口加一个多行 TextBox），用于在不触碰用户正在使用的应用的前提下做可重复的自动化回归：鼠标事件由 `mouse_event` 注入，浮窗通过枚举窗口定位，剪贴板前后对比。它代表的是经典 Win32 Edit 控件这一类目标，结论可推广到老式对话框和记事本以外的 Win32 程序，但不能替代真实应用测试。源码不在仓库内，需要时可按 `docs/COMPATIBILITY.md` 的描述几分钟内重建。
+
 ## 测试机记录
 
 | 日期 | 平台 | 系统版本 | Copick 版本 | 显示器 / 缩放 | 测试人 |
 |---|---|---|---|---|---|
 | 2026-10-17 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1（打包版与开发态） | 单屏 2560×1440 / 100% | 自动化脚本，鼠标事件由 mouse_event 注入 |
+| 2026-10-18 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1 含 moveTop 修复 | 单屏 2560×1440 / 100% | 用户真鼠标：多款应用共 10 次取词全部复制成功，其中 UIA 4 次、回退 6 次；VS Code 与 Terminal 见各自行 |

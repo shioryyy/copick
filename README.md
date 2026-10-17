@@ -42,6 +42,7 @@ CI 在 macOS arm64 和 Windows x64 runner 上执行以上检查，并对打包�
 
 - macOS：`programName` 是 selection-hook 原生源码返回的前台应用 **bundle identifier**（例如 `com.apple.finder`），不是臆造的 bundle id 或显示名称。辅助功能状态由 `macIsProcessTrusted()` 提供，每两秒及设置聚焦/托盘操作时刷新；授权后自动恢复监听，撤销后停止监听，不改变用户手动暂停设置，也不清除其他错误。设置页和托盘均可重新检查权限及打开系统设置。默认关闭快捷键剪贴板回退，可在设置中开启。
 - Windows：`programName` 是可执行程序名（例如 `code.exe`）。默认开启剪贴板回退，可在设置中关闭。Windows 坐标在进入 Electron bounds 前使用 `screenToDipPoint`；macOS 坐标直接使用 Cocoa screen points，不做该转换。
+- VS Code、Cursor、Windsurf 这类基于 Monaco 的编辑器默认不开放编辑器文本的无障碍树，Copick 又对它们禁用了快捷键回退（避免打断集成终端），因此默认情况下不会弹窗。需要在编辑器设置里把 `editor.accessibilitySupport` 设为 `on`，之后走无障碍直接取词。
 - 两个平台都在原生过滤器和 JS 层过滤。Windows 常见终端、密码管理器和 Copick 有平台内置完全黑名单；macOS Terminal/iTerm2（`com.apple.terminal` / `com.googlecode.iterm2`）及 IDE 只禁止快捷键回退，允许直接无障碍取词。过滤标识统一小写。
 - 回退可能临时修改剪贴板，原生库尽力备份/恢复但不保证私有格式、并发复制或剪贴板管理器状态。关闭回退可避免该影响。
 
