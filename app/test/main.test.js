@@ -176,3 +176,21 @@ test('popup activation does not open settings; Dock activation without windows d
   h.app.emit('activate', {}, false);
   assert.equal(h.windows.length, 2);
 });
+test('IPC sender check compares decoded page paths, not URL spelling', async () => {
+  const h = await harness({ platform: process.platform === 'win32' ? 'win32' : 'darwin' }); h.open();
+  const settings = h.windows.find(window => window.options.title);
+  const href = settings.webContents.mainFrame.url;
+  // Chromium may spell the same file URL differently from Node: percent-encoding of
+  // non-ASCII or space-containing install paths, or drive-letter case on Windows.
+  settings.webContents.mainFrame.url = href.replace(/settings\.html$/, 'settings%2Ehtml');
+  assert.ok(h.invoke('settings:read'));
+  if (process.platform === 'win32') {
+    settings.webContents.mainFrame.url = href.replace(/^file:\/\/\/([A-Z]):/, (_match, drive) => `file:///${drive.toLowerCase()}:`);
+    assert.ok(h.invoke('settings:read'));
+  }
+  for (const url of [href.replace('settings.html', 'popup.html'), href.replace(/^file:/, 'http:'),
+    'file:///tmp/settings.html', 'not a url', undefined]) {
+    settings.webContents.mainFrame.url = url;
+    assert.throws(() => h.invoke('settings:read'), /Invalid sender/);
+  }
+});

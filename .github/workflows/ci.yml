@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  test:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest   # Apple Silicon runner: darwin-arm64 prebuild
+            label: macOS arm64
+            pack: npm run pack:mac
+          - os: windows-latest # win32-x64 prebuild
+            label: Windows x64
+            pack: npm run dist:win
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      # Loads the bundled selection-hook native module inside Electron and exits.
+      # No global hooks, no synthetic keys; proves the prebuild matches this OS/arch/Electron.
+      - name: Native module smoke test
+        shell: bash
+        run: |
+          npx electron . --smoke-test 2>&1 | tee smoke.log
+          grep -q COPICK_SMOKE_OK smoke.log
+
+      - name: Package
+        run: ${{ matrix.pack }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke test packaged app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            app=$(find release -maxdepth 3 -name 'Copick.app' -type d | head -1)
+            bin="$app/Contents/MacOS/Copick"
+          else
+            bin=$(find release -maxdepth 3 -name 'Copick.exe' -type f | head -1)
+          fi
+          echo "binary: $bin"
+          "$bin" --smoke-test 2>&1 | tee packaged-smoke.log || true
+          grep -q COPICK_SMOKE_OK packaged-smoke.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: copick-${{ matrix.os }}
+          path: |
+            app/release/*.zip
+            app/release/*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --ignore-scripts
+      # Runtime dependencies must be clean; dev tooling (electron-builder chain) is reported only.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=low
+      - name: Audit all dependencies (informational)
+        run: npm audit || true

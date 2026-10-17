@@ -29,4 +29,6 @@
 
 ## 验证边界
 
-`npm run check` 和 `npm test` 验证静态语法、平台策略、标识格式、配置失败闭锁和纯坐标函数。`--smoke-test` 只加载 native module，不启动 hook、不发送按键。实际 macOS Accessibility/AX 应用兼容性、Windows 混合 DPI/管理员窗口/焦点保持必须在对应桌面交互测试；本机静态或加载测试不能替代它们。
+`npm run check` 和 `npm test` 验证静态语法、平台策略、标识格式、配置失败闭锁和纯坐标函数。`--smoke-test` 只加载 native module，不启动 hook、不发送按键。实际 macOS Accessibility/AX 应用兼容性、Windows 混合 DPI/管理员窗口/焦点保持必须在对应桌面交互测试；本机静态或加载测试不能替代它们。真机结果记录在 `docs/COMPATIBILITY.md`，发版前按其中的用例逐项更新。
+
+IPC 发送方校验比较的是 `fileURLToPath` 解码后的页面路径（Windows 下忽略大小写），而不是 URL 字符串，避免 Chromium 与 Node 对含空格、非 ASCII 字符或盘符大小写的安装路径编码不一致时所有 IPC 静默失败。

@@ -12,6 +12,8 @@
 | `app/` | 跨平台 Electron 主应用、浮窗、托盘、设置、策略与打包配置 |
 | `build/` | 复用图标与构建辅助文件 |
 | `docs/DESIGN.md` | 主路线与平台边界 |
+| `docs/COMPATIBILITY.md` | 真机兼容性矩阵与发版前测试用例 |
+| `.github/workflows/ci.yml` | macOS arm64 与 Windows x64 双平台 CI：检查、测试、smoke test、打包 |
 
 ## 开发与检查
 
@@ -29,6 +31,8 @@ npm run dist:win
 ```
 
 产物位于 `app/release/`，文件名包含平台和架构。打包使用 Electron Builder、asar 和 selection-hook 官方预编译模块；不增加框架、sidecar、安装器或 updater。Windows 构建由 Windows 环境负责，macOS 不模拟 Windows native 模块。
+
+CI 在 macOS arm64 和 Windows x64 runner 上执行以上检查，并对打包后的产物再跑一次 `--smoke-test`，产物以 artifact 保留 14 天。Dependabot 每周检查 npm 依赖，`selection-hook` 被排除在自动升级之外，需人工核对 `docs/DESIGN.md` 中的契约后再升级。
 
 `electron . --smoke-test` 只加载 bundled `selection-hook` native module 并退出，不调用 `start()`、不启动全局监听、不发送合成按键。可用于静态/加载检查，不能代替桌面交互验证。
 

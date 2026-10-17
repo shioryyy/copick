@@ -1,7 +1,7 @@
 'use strict';
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, session, shell } = require('electron');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { fileURLToPath } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { loadConfig, saveConfig } = require('./config');
 const { PROTECTED, NO_CLIPBOARD, validateConfig, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
@@ -13,7 +13,6 @@ let permissionGranted = null;
 const permissionMessage = '需要辅助功能权限，选区监听已暂停。请在系统设置中允许 Copick，然后重新检查权限。';
 function diag(event, metadata, interval) { if (diagnostics) diagnostics.log(event, metadata, interval); }
 const page = name => path.join(__dirname, `${name}.html`);
-const pageURL = name => pathToFileURL(page(name)).href;
 const preload = path.join(__dirname, 'preload.js');
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
@@ -164,9 +163,18 @@ function rebuildTray() {
     { label: '退出 Copick', click: () => app.quit() }
   ]));
 }
+function samePage(url, name) {
+  // Compare decoded paths, not URL strings: Chromium and Node may percent-encode spaces,
+  // non-ASCII install paths or drive-letter case differently.
+  try {
+    if (typeof url !== 'string' || !url.startsWith('file:')) return false;
+    const actual = path.resolve(fileURLToPath(url)), expected = path.resolve(page(name));
+    return isWindows ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
+  } catch { return false; }
+}
 function trusted(event, window, name) {
-  return window && !window.isDestroyed() && event.sender === window.webContents &&
-    event.senderFrame === window.webContents.mainFrame && event.senderFrame.url === pageURL(name);
+  return Boolean(window && !window.isDestroyed() && event.sender === window.webContents &&
+    event.senderFrame === window.webContents.mainFrame && samePage(event.senderFrame.url, name));
 }
 function installIPC() {
   ipcMain.handle('settings:read', event => {
