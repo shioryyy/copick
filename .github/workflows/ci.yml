@@ -78,7 +78,7 @@ jobs:
           "$bin" --smoke-test 2>&1 | tee packaged-smoke.log || true
           grep -q COPICK_SMOKE_OK packaged-smoke.log
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: copick-${{ matrix.os }}
           path: |
