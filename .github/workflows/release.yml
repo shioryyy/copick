@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Manual dry run: builds, verifies and produces checksums without publishing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./app/package.json').version")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/v}"
+            if [[ "$tag" != "$pkg" ]]; then
+              echo "::error::tag v$tag does not match app/package.json version $pkg"
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          prerelease=false; [[ "$pkg" == *-* ]] && prerelease=true
+          echo "version=$pkg" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "version=$pkg prerelease=$prerelease publish=$(grep publish= "$GITHUB_OUTPUT" | tail -1)"
+
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Section starts at "## [VERSION]" and ends before the next "## [".
+          awk -v v="$VERSION" '
+            /^## \[/ { if (found) exit; found = index($0, "## [" v "]") == 1; next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [[ ! -s notes.md ]]; then
+            echo "::error::CHANGELOG.md has no section for [$VERSION]"
+            exit 1
+          fi
+          {
+            echo "## Copick v$VERSION"
+            echo
+            cat notes.md
+            echo
+            echo "### 安装"
+            echo
+            echo "- **macOS Apple Silicon（arm64）**：下载 \`Copick-$VERSION-mac-arm64.zip\`，解压后将 Copick.app 拖入「应用程序」，在「系统设置 → 隐私与安全性 → 辅助功能」允许 Copick。此包未签名、未公证，系统可能阻止首次启动。"
+            echo "- **Windows 11 x64**：下载 \`Copick-$VERSION-win-x64.zip\`，完整解压到固定目录后运行 \`Copick.exe\`。无安装器、未代码签名，可能出现 SmartScreen 提示。不能仅复制 EXE。"
+            echo "- 更新前请从托盘退出旧版。\`SHA256SUMS.txt\` 提供全部附件的 SHA-256 校验值。"
+            echo "- 兼容性实测结果见 [docs/COMPATIBILITY.md](https://github.com/${GITHUB_REPOSITORY}/blob/v$VERSION/docs/COMPATIBILITY.md)。"
+          } > release-body.md
+          cat release-body.md
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: copick-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify artifacts and write checksums
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          rm -f *.yml *.yaml *.blockmap
+          ls -la
+          for name in "Copick-$VERSION-mac-arm64.zip" "Copick-$VERSION-win-x64.zip"; do
+            [[ -f "$name" ]] || { echo "::error::missing $name"; exit 1; }
+          done
+          sha256sum *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          flags=(--title "Copick v$VERSION" --notes-file release-body.md --verify-tag)
+          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::release v$VERSION already exists; delete it or bump the version"
+            exit 1
+          fi
+          gh release create "v$VERSION" "${flags[@]}" dist/*.zip dist/SHA256SUMS.txt
+          gh release view "v$VERSION" --json url,isPrerelease,assets -q '.url + " prerelease=" + (.isPrerelease|tostring) + " assets=" + ([.assets[].name] | join(", "))'
+
+      - name: Dry-run summary
+        if: steps.version.outputs.publish != 'true'
+        shell: bash
+        run: |
+          echo "Dry run: nothing published. Release body preview:" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          cat release-body.md >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat dist/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
