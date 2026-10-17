@@ -59,8 +59,8 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 | 应用 | 程序名 | 取词 | 回退 | 高 DPI | 备注 |
 |---|---|---|---|---|---|
 | Edge 网页 | msedge.exe | ✅ 2026-10-18 UIA | — | ✅ 100% | 第一次拖选因鼠标移开过快被丢弃（cursor-moved），第二次 UIA 取词、复制成功 |
-| Chrome | chrome.exe | — | — | — | 测试机未安装 |
-| Firefox | firefox.exe | — | — | — | 测试机未安装 |
+| Chrome | chrome.exe | ✅ 2026-10-18 UIA | ✅ 2026-10-18 | ✅ 100% | 第一轮首次取词走回退（method=99），关闭回退复测走 UIA。推测 Chromium 的无障碍树在首次被 UIA 客户端查询后才激活，首次选择会落到回退 |
+| Firefox | firefox.exe | ✅ 2026-10-18 UIA | ✅ 2026-10-18 | ✅ 100% | 与 Chrome 相同：第一轮走回退，关闭回退复测走 UIA，无障碍按需激活 |
 | 记事本 | notepad.exe | ✅ 2026-10-18 UIA | — | ✅ 100% | 关闭回退后仍弹窗，走 UIA |
 | Word | winword.exe | ✅ 2026-10-18 UIA | — | ✅ 100% | 关闭回退后仍弹窗，走 UIA |
 | Excel 单元格 | excel.exe | ❌ 2026-10-18 | ✅ 2026-10-18 | ✅ 100% | 关闭回退后无弹窗，只能靠回退 |
@@ -68,7 +68,7 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 | Acrobat Reader | acrord32.exe / acrobat.exe | — | — | — | 2026-10-18 未测 |
 | Edge PDF | msedge.exe | ❌ 2026-10-18 | ✅ 2026-10-18 | ✅ 100% | 关闭回退后无弹窗，只能靠回退；同一进程的网页可走 UIA |
 | 微信 | weixin.exe | ❌ 2026-10-18 | ✅ 2026-10-18 | ✅ 100% | 关闭回退后无弹窗，只能靠回退 |
-| 飞书 | feishu.exe | — | — | — | Electron；测试机未安装 |
+| 飞书 8.2 | feishu.exe | ✅ 2026-10-18 UIA | — | ✅ 100% | Electron，两轮均走 UIA |
 | 资源管理器文件名 | explorer.exe | ❌ 2026-10-18 | ✅ 2026-10-18 | ✅ 100% | 关闭回退后无弹窗，只能靠回退 |
 | VS Code 1.132 | code.exe | ⚠️ 2026-10-18 | 禁用 | ✅ 100% | 默认设置下无任何事件：Monaco 编辑器不开放无障碍树（UIA 报 "The editor is not accessible at this time"），而回退被策略禁用。把 `editor.accessibilitySupport` 设为 `on` 后 UIA 取词成功（method=1，posLevel=3），浮窗位置正确。临时配置目录对照实验，两种配置各拖选两次 |
 | 自建 Win32 Edit 测试宿主（见下方说明） | copicktesthost.exe | ❌ UIA 未取到 | ✅ 0.3.0-beta.1 2026-10-17 | ✅ 100% | 通用 6 步全部通过：浮窗位置、复制内容、焦点保持、7 秒超时、点击/滚轮消失、快速移开丢弃。取词走 method=99 回退，说明关闭回退后经典 Win32 Edit 控件取不到词 |
@@ -92,7 +92,7 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 
 ## Windows 上关闭回退的代价
 
-2026-10-18 的真机结果说明，Windows 默认开启回退是必要的：关闭后 Excel 单元格、Edge 内置 PDF、微信聊天记录和资源管理器文件名全部取不到词，只剩浏览器网页、记事本、Word 这类实现了 UIA TextPattern 的应用。设置页应让用户知道这一点。
+2026-10-18 的真机结果说明，Windows 默认开启回退是必要的：关闭后 Excel 单元格、Edge 内置 PDF、微信聊天记录和资源管理器文件名全部取不到词，只剩浏览器网页、记事本、Word、飞书这类实现了 UIA TextPattern 的应用。另外 Chrome 和 Firefox 在启动后的首次取词会落到回退，因为它们的无障碍树要等第一个 UIA 客户端查询后才激活；关闭回退时这第一次选择会静默失败，第二次起正常。设置页应让用户知道这一点。
 
 ## 关于「自建 Win32 Edit 测试宿主」
 
@@ -103,4 +103,4 @@ Copick 的全部价值是「在某个应用里选中文字后，浮窗可靠出�
 | 日期 | 平台 | 系统版本 | Copick 版本 | 显示器 / 缩放 | 测试人 |
 |---|---|---|---|---|---|
 | 2026-10-17 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1（打包版与开发态） | 单屏 2560×1440 / 100% | 自动化脚本，鼠标事件由 mouse_event 注入 |
-| 2026-10-18 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1 含 moveTop 修复 | 单屏 2560×1440 / 100% | 用户真鼠标按本表顺序测试：10 次弹窗全部复制成功，UIA 4 次、回退 6 次。随后用户关闭回退复测：Edge 网页、记事本、Word 仍弹窗（UIA）；Excel、Edge PDF、微信、资源管理器文件名无弹窗（仅回退）；VS Code、Terminal 无弹窗（策略）。各行据此确定 |
+| 2026-10-18 | Windows x64 | Windows 11 Pro 10.0.26300 | 0.3.0-beta.1 含 moveTop 修复 | 单屏 2560×1440 / 100% | 用户真鼠标按本表顺序测试：10 次弹窗全部复制成功，UIA 4 次、回退 6 次。第一轮 10 次弹窗按本表顺序对应 Edge、Chrome、Firefox、记事本、Word、Excel、Edge PDF、微信、飞书、资源管理器，method 序列为 1/99/99/1/1/99/99/99/1/99。随后关闭回退复测：Edge、Chrome、Firefox、记事本、Word、飞书仍弹窗（UIA）；Excel、Edge PDF、微信、资源管理器文件名无弹窗（仅回退）；VS Code、Terminal 无弹窗（策略）。两轮互相印证 |
