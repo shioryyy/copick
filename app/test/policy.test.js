@@ -7,7 +7,7 @@ const path = require('node:path');
 const { NO_CLIPBOARD, normalizeList, validateConfig, isBlocked, popupBounds, validPoint } = require('../src/policy');
 const { loadConfig, saveConfig } = require('../src/config');
 const isMac = process.platform === 'darwin';
-const config = { paused: false, clipboardFallback: !isMac, blacklist: [] };
+const config = { paused: false, clipboardFallback: !isMac, launchAtLogin: false, blacklist: [] };
 
 test('platform defaults and identifiers match selection-hook programName', () => {
   if (isMac) {
@@ -62,7 +62,7 @@ test('settings round trip, defaults, and corrupt-file fail-closed behavior', t =
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'nested', 'config.json');
   assert.deepEqual(loadConfig(file).config, config);
-  const disabled = { paused: true, clipboardFallback: false, blacklist: [isMac ? 'com.example.app' : 'example.exe'] };
+  const disabled = { paused: true, clipboardFallback: false, launchAtLogin: true, blacklist: [isMac ? 'com.example.app' : 'example.exe'] };
   saveConfig(file, disabled);
   assert.deepEqual(loadConfig(file).config, disabled);
   assert.throws(() => saveConfig(file, { ...config, blacklist: [isMac ? '*' : '*'] }));

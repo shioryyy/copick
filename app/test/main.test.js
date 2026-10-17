@@ -13,7 +13,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   vm.runInNewContext(fs.readFileSync(path.join(root, 'policy.js'), 'utf8'), policyContext);
   const policy = policyContext.module.exports;
   const calls = { stop: 0, start: [], writes: [], workspaces: [] };
-  let persisted = { paused, clipboardFallback: false, blacklist: [] };
+  let persisted = { paused, clipboardFallback: false, launchAtLogin: false, blacklist: [] };
+  let loginItem = { openAtLogin: false };
   let saveFails = false, startFails = false;
   const handlers = new Map(), windows = [], intervals = [];
   class Hook extends EventEmitter {
@@ -54,6 +55,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   }
   const app = Object.assign(new EventEmitter(), {
     requestSingleInstanceLock: () => true, setName() {}, setAppUserModelId() {}, setPath() {}, setAppLogsPath() {},
+    setLoginItemSettings(value) { calls.loginItems = (calls.loginItems || []).concat(value); loginItem = { openAtLogin: value.openAtLogin }; },
+    getLoginItemSettings: () => loginItem,
     whenReady: () => Promise.resolve(), getPath: () => '/fake', quit() {}, exit() {}, getVersion: () => 'test'
   });
   const electron = { app, BrowserWindow: Window, Tray, Menu: { buildFromTemplate: value => value },
@@ -79,7 +82,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   function open() { Tray.instance.menu.find(item => item.label === '设置与应用黑名单…').click(); }
   return { calls, windows, policy, app, hook: Hook.instance, tray: Tray.instance, invoke, open,
     get persisted() { return persisted; }, grant(value) { granted = value; },
-    failSave() { saveFails = true; }, failStart() { startFails = true; }, tick() { intervals.forEach(fn => fn()); } };
+    failSave() { saveFails = true; }, failStart() { startFails = true; }, tick() { intervals.forEach(fn => fn()); },
+    setLoginItem(value) { loginItem = value; } };
 }
 
 test('invalid settings and failed persistence leave config and running hook untouched', async () => {
@@ -193,4 +197,28 @@ test('IPC sender check compares decoded page paths, not URL spelling', async () 
     settings.webContents.mainFrame.url = url;
     assert.throws(() => h.invoke('settings:read'), /Invalid sender/);
   }
+});
+
+test('launchAtLogin writes the system login item only when it changes and reports actual state', async () => {
+  const h = await harness(); h.open();
+  assert.equal(h.calls.loginItems, undefined);
+  const on = h.invoke('settings:save', { ...h.persisted, launchAtLogin: true });
+  assert.equal(on.ok, true);
+  assert.equal(JSON.stringify(h.calls.loginItems), JSON.stringify([{ openAtLogin: true, name: 'Copick' }]));
+  assert.equal(on.state.launchAtLogin, true);
+  assert.equal(on.state.loginItemActual, true);
+  h.invoke('settings:save', { ...h.persisted, paused: true });
+  assert.equal(h.calls.loginItems.length, 1);
+  // Entry vanished (moved portable folder): state exposes the mismatch; restart re-asserts it.
+  h.setLoginItem({ openAtLogin: false });
+  assert.equal(h.invoke('settings:read').loginItemActual, false);
+  const off = h.invoke('settings:save', { ...h.persisted, launchAtLogin: false });
+  assert.equal(JSON.stringify(h.calls.loginItems.at(-1)), JSON.stringify({ openAtLogin: false, name: 'Copick' }));
+  assert.equal(off.state.loginItemActual, false);
+});
+test('config files written before launchAtLogin existed still load with it off', async () => {
+  const h = await harness();
+  const legacy = h.policy.validateConfig({ paused: false, clipboardFallback: true, blacklist: [] });
+  assert.equal(legacy.launchAtLogin, false);
+  assert.throws(() => h.policy.validateConfig({ paused: false, clipboardFallback: true, launchAtLogin: 'yes', blacklist: [] }));
 });

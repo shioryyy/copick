@@ -9,6 +9,8 @@
 <label class="toggle"><input id="paused" type="checkbox"><span>暂停划词</span></label>
 <label class="toggle"><input id="fallback" type="checkbox"><span>启用快捷键回退</span></label>
 <p class="help">取词失败时模拟复制，会临时改动剪贴板，也可能被剪贴板历史记录。关闭后 Excel、PDF 阅读器、微信、资源管理器等不支持无障碍取词的应用将不再弹窗。终端和 VS Code 等编辑器始终不使用回退；VS Code 需把 editor.accessibilitySupport 设为 on 才能取词。</p>
+<label class="toggle"><input id="launch" type="checkbox"><span>开机自动启动</span></label>
+<p id="launch-help" class="help">登录后在后台启动，只显示托盘图标。</p>
 <section><h2><label for="blacklist">应用黑名单</label></h2>
 <p id="blacklist-help" class="help"></p>
 <textarea id="blacklist" rows="3" spellcheck="false"></textarea>

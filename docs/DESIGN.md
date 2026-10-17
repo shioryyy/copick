@@ -2,7 +2,7 @@
 
 ## 主路线
 
-`app/` 是唯一的跨平台 Electron 主路线：主进程统一负责 selection-hook 生命周期、浮窗、托盘、设置、配置和 IPC；平台差异集中在策略标识、权限提示、坐标单位、图标和打包目标。当前目标是 macOS arm64 与 Windows x64，不引入框架、sidecar、安装器或 updater。
+`app/` 是唯一的跨平台 Electron 主路线：主进程统一负责 selection-hook 生命周期、浮窗、托盘、设置、配置和 IPC；平台差异集中在策略标识、权限提示、坐标单位、图标和打包目标。当前目标是 macOS arm64 与 Windows x64，不引入框架、sidecar 或 updater；Windows 提供 electron-builder 内置 NSIS 安装包（按用户安装、可选目录、开始菜单快捷方式、卸载保留用户数据），便携 ZIP 继续提供。
 
 ## selection-hook 2.1.1 契约
 
@@ -22,6 +22,8 @@
 主进程保留选中文字，渲染器只收到短期 token。macOS 浮窗设置 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`，使用不可聚焦窗口与 `showInactive()` 避免激活或主动切换 Space；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。显示后调用 `moveTop()`，否则源应用自身置顶时浮窗会留在它下面，点击落到源窗口（Windows 真机复现并修复）。
 
 复制前无法通过现有库可靠核验当前前台应用：`index.d.ts` 没有只读身份接口，`MouseEventData` 仅含坐标/按钮；macOS `GetCurrentSelection` 进入 `SelectionEngine::GetSelectedText`，AX 失败会尝试 ⌘C 回退。为保留仅回退取词的复制能力，未采用关闭回退后再次取词的保守拒绝方案。非键鼠触发的前台切换仍可能留下旧 token，需要原生只读前台身份接口才可完整修复。
+
+`launchAtLogin` 是 0.3.0-beta.1 之后加入的配置项，校验时缺省为 false 以兼容旧文件；只在值变化时调用 `setLoginItemSettings`，启动时若配置为开但系统未登记则重新登记。状态里的 `loginItemActual` 来自 `getLoginItemSettings`，让设置页能显示便携版移动目录后的失效。
 
 配置保存先校验并原子持久化，再停止/重配监听；非法输入及持久化失败保留已有配置和监听。启动失败保留已保存用户意图、停止运行并单独报告错误，避免磁盘与内存的暂停/回退设置不一致。
 

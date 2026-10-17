@@ -1,6 +1,7 @@
 'use strict';
 const paused = document.getElementById('paused');
 const fallback = document.getElementById('fallback');
+const launch = document.getElementById('launch');
 const blacklist = document.getElementById('blacklist');
 const message = document.getElementById('message');
 let dirty = false;
@@ -8,9 +9,13 @@ function render(value, force = false) {
   if (!dirty || force) {
     paused.checked = value.paused;
     fallback.checked = value.clipboardFallback;
+    launch.checked = value.launchAtLogin;
     blacklist.value = value.blacklist.join('\n');
     dirty = false;
   }
+  document.getElementById('launch-help').textContent = value.launchAtLogin && value.loginItemActual === false
+    ? '系统中未登记开机启动项。便携版移动过目录会失效；请关闭后重新开启，或改用安装版。'
+    : '登录后在后台启动，只显示托盘图标。';
   document.getElementById('status').textContent = [value.error, value.permissionMessage].filter(Boolean).join(' ') ||
     (value.paused ? '已暂停' : value.running ? '正在监听选区' : '监听未启动');
   const mac = value.accessibility !== null;
@@ -33,7 +38,7 @@ document.getElementById('settings').addEventListener('submit', async event => {
   button.disabled = true;
   try {
     const result = await window.copickSettings.save({ paused: paused.checked,
-      clipboardFallback: fallback.checked, blacklist: blacklist.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean) });
+      clipboardFallback: fallback.checked, launchAtLogin: launch.checked, blacklist: blacklist.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean) });
     render(result.state, result.ok);
     message.textContent = result.ok ? '已保存' : result.error;
   } catch { message.textContent = '保存失败，请重新打开设置后重试。'; }

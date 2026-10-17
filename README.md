@@ -4,6 +4,7 @@
 
 - 纯本地运行：无网络请求、无 AI、无遥测，不保存选中文字。
 - 统一 Electron + `selection-hook` 2.1.1 主路线，当前支持 macOS arm64 与 Windows x64。
+- Windows 提供 NSIS 安装版（按用户安装，无需管理员）和便携 ZIP；macOS 提供 ZIP。两端都可在设置或托盘开启开机自动启动。
 
 ## 目录
 
@@ -28,11 +29,11 @@ npm run check
 npm test
 # macOS arm64 ZIP
 npm run pack:mac
-# Windows x64 ZIP（需在 Windows 执行）
+# Windows x64 ZIP + NSIS 安装包（需在 Windows 执行）
 npm run dist:win
 ```
 
-产物位于 `app/release/`，文件名包含平台和架构。打包使用 Electron Builder、asar 和 selection-hook 官方预编译模块；不增加框架、sidecar、安装器或 updater。Windows 构建由 Windows 环境负责，macOS 不模拟 Windows native 模块。
+产物位于 `app/release/`，文件名包含平台和架构。打包使用 Electron Builder、asar 和 selection-hook 官方预编译模块；Windows 安装器为 electron-builder 内置 NSIS（非 oneClick、按用户、可选目录、开始菜单快捷方式、不删用户数据），不增加框架、sidecar 或 updater。CI 会静默安装 NSIS 包、对安装后的二进制跑 smoke test 再静默卸载。Windows 构建由 Windows 环境负责，macOS 不模拟 Windows native 模块。
 
 CI 在 macOS arm64 和 Windows x64 runner 上执行以上检查，并对打包后的产物再跑一次 `--smoke-test`，产物以 artifact 保留 14 天。Dependabot 每周检查 npm 依赖，`selection-hook` 被排除在自动升级之外，需人工核对 `docs/DESIGN.md` 中的契约后再升级。
 
@@ -45,6 +46,7 @@ CI 在 macOS arm64 和 Windows x64 runner 上执行以上检查，并对打包�
 应用默认单实例，关闭设置窗口不会退出；托盘可暂停、启用回退、加入最近应用黑名单和退出。选中文字只存在主进程内存，复制浮窗使用短期 token。
 
 - macOS：`programName` 是 selection-hook 原生源码返回的前台应用 **bundle identifier**（例如 `com.apple.finder`），不是臆造的 bundle id 或显示名称。辅助功能状态由 `macIsProcessTrusted()` 提供，每两秒及设置聚焦/托盘操作时刷新；授权后自动恢复监听，撤销后停止监听，不改变用户手动暂停设置，也不清除其他错误。设置页和托盘均可重新检查权限及打开系统设置。默认关闭快捷键剪贴板回退，可在设置中开启。
+- 开机自启使用 Electron 的 `setLoginItemSettings`：Windows 写当前用户的注册表 Run 项，macOS 写登录项。设置页会显示系统中的实际状态；便携版移动目录后登记失效，需关闭再开启。未签名的 macOS 应用在登录项里可能显示为开发者未知。
 - Windows：`programName` 是可执行程序名（例如 `code.exe`）。默认开启剪贴板回退，可在设置中关闭。Windows 坐标在进入 Electron bounds 前使用 `screenToDipPoint`；macOS 坐标直接使用 Cocoa screen points，不做该转换。
 - VS Code、Cursor、Windsurf 这类基于 Monaco 的编辑器默认不开放编辑器文本的无障碍树，Copick 又对它们禁用了快捷键回退（避免打断集成终端），因此默认情况下不会弹窗。需要在编辑器设置里把 `editor.accessibilitySupport` 设为 `on`，之后走无障碍直接取词。
 - 两个平台都在原生过滤器和 JS 层过滤。Windows 常见终端、密码管理器和 Copick 有平台内置完全黑名单；macOS Terminal/iTerm2（`com.apple.terminal` / `com.googlecode.iterm2`）及 IDE 只禁止快捷键回退，允许直接无障碍取词。过滤标识统一小写。

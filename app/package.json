@@ -15,7 +15,7 @@
     "test": "node --test test/*.test.js",
     "pack:mac": "electron-builder --mac zip --arm64",
     "pack:win": "electron-builder --win --x64 --dir",
-    "dist:win": "electron-builder --win zip --x64"
+    "dist:win": "electron-builder --win --x64"
   },
   "dependencies": {
     "selection-hook": "2.1.1"
@@ -50,10 +50,24 @@
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        "zip"
+        "zip",
+        "nsis"
       ],
       "signExecutable": false
     },
-    "artifactName": "Copick-${version}-${os}-${arch}.${ext}"
+    "artifactName": "Copick-${version}-${os}-${arch}.${ext}",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Copick-Setup-${version}-${os}-${arch}.${ext}",
+      "shortcutName": "Copick",
+      "uninstallDisplayName": "Copick",
+      "language": "2052"
+    }
   }
 }

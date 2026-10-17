@@ -24,8 +24,20 @@ function hidePopup(reason = 'internal') {
   current = null;
   if (popup && !popup.isDestroyed()) popup.hide();
 }
+function loginItemActual() {
+  try { return app.getLoginItemSettings().openAtLogin === true; } catch { return null; }
+}
+function applyLoginItem() {
+  // Registry Run key on Windows, Login Items on macOS. Portable ZIP users who move the
+  // folder break the entry; the settings page shows the actual system state so it is visible.
+  try {
+    app.setLoginItemSettings({ openAtLogin: config.launchAtLogin, name: 'Copick' });
+  } catch (error) { diag('login-item-error', errorMetadata(error), 0); }
+  diag('login-item', { launchAtLogin: config.launchAtLogin, loginItemActual: loginItemActual() }, 0);
+}
 function state() {
-  return { ...config, protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
+  return { ...config, loginItemActual: loginItemActual(),
+    protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
     accessibility: permissionGranted, permissionMessage: permissionGranted === false ? permissionMessage : null,
     running: Boolean(hook?.isRunning()), error: failure, configPath: configFile };
 }
@@ -97,8 +109,10 @@ function updateConfig(next) {
   const validated = validateConfig(next);
   const saved = saveConfig(configFile, validated);
   hidePopup();
+  const loginChanged = !config || config.launchAtLogin !== saved.launchAtLogin;
   config = saved;
   failure = null;
+  if (loginChanged) applyLoginItem();
   try {
     applyHook();
   } catch (error) {
@@ -148,6 +162,8 @@ function rebuildTray() {
       click: item => safeUpdate({ ...config, paused: item.checked }) },
     { label: `启用快捷键回退（${isMac ? '⌘C' : 'Ctrl+C'}）`, type: 'checkbox', checked: config.clipboardFallback,
       click: item => safeUpdate({ ...config, clipboardFallback: item.checked }) },
+    { label: '开机自动启动', type: 'checkbox', checked: config.launchAtLogin,
+      click: item => safeUpdate({ ...config, launchAtLogin: item.checked }) },
     { type: 'separator' },
     { label: lastProgram ? `禁用最近取词应用：${lastProgram}` : '禁用最近取词应用',
       enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
@@ -331,6 +347,8 @@ if (!isMac && !isWindows) {
     permissionGranted = accessibilityState();
     diag('permissions', { accessibility: permissionGranted,
       permissionProbe: isMac ? 'mac-accessibility' : 'windows-no-permission-probe-api' }, 0);
+    // Re-assert the login item: the executable may have moved (portable ZIP) or been reinstalled.
+    if (config.launchAtLogin && loginItemActual() === false) applyLoginItem();
     if (!failure) {
       try { applyHook(); } catch (error) { diag('hook-start-error', errorMetadata(error), 0); failure = error.message; }
     } else diag('hook-skipped', { reason: 'startup-failure', paused: config.paused }, 0);

@@ -47,8 +47,10 @@ function normalizeList(input) {
 function validateConfig(value) {
   if (!value || typeof value !== 'object' || typeof value.paused !== 'boolean' ||
       typeof value.clipboardFallback !== 'boolean') throw new Error('设置格式无效。');
+  // launchAtLogin was added after 0.3.0-beta.1; older config files omit it.
+  if (value.launchAtLogin !== undefined && typeof value.launchAtLogin !== 'boolean') throw new Error('设置格式无效。');
   return { paused: value.paused, clipboardFallback: value.clipboardFallback,
-    blacklist: normalizeList(value.blacklist) };
+    launchAtLogin: value.launchAtLogin === true, blacklist: normalizeList(value.blacklist) };
 }
 function blockedPrograms(config) { return [...new Set([...PROTECTED, ...config.blacklist])]; }
 function isBlocked(name, config) {

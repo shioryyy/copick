@@ -79,11 +79,54 @@ jobs:
           "$bin" --smoke-test 2>&1 | tee packaged-smoke.log || true
           grep -q COPICK_SMOKE_OK packaged-smoke.log
 
+      # Silent-install the NSIS package into a scratch directory, smoke test the installed
+      # binary, then run the generated uninstaller. Proves the installer and its uninstall path.
+      - name: Install, launch-at-login and uninstall checks (NSIS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem release -Filter 'Copick-Setup-*.exe' | Select-Object -First 1
+          if (-not $setup) { Write-Error 'installer not found' }
+          $target = Join-Path $env:RUNNER_TEMP 'copick-install'
+          Write-Host "installer: $($setup.FullName) -> $target"
+          # NSIS: /S silent install, /D=<dir> must be the last argument and unquoted.
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$target" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "installer exit code $($p.ExitCode)" }
+          $exe = Join-Path $target 'Copick.exe'
+          if (-not (Test-Path $exe)) { Write-Error 'installed Copick.exe missing' }
+          $out = & $exe --smoke-test 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'COPICK_SMOKE_OK') { Write-Error 'installed binary smoke test failed' }
+
+          # Launch-at-login: seed a paused config so no hook or window starts, run the installed
+          # app once, and verify it registers the HKCU Run entry for this user.
+          $cfgDir = Join-Path $env:APPDATA 'Copick'
+          New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+          '{"paused":true,"clipboardFallback":false,"launchAtLogin":true,"blacklist":[]}' |
+            Set-Content -Path (Join-Path $cfgDir 'config.json') -Encoding utf8
+          $appProc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 12
+          $run = (reg query 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v Copick 2>$null | Out-String)
+          if (-not $run -match 'Copick') { Write-Error 'launchAtLogin did not register the HKCU Run entry' }
+          Write-Host "Run entry: $($run.Trim())"
+          Stop-Process -Id $appProc.Id -Force -ErrorAction SilentlyContinue
+          Get-Process Copick -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Copick -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force $cfgDir -ErrorAction SilentlyContinue
+
+          $un = Start-Process -FilePath (Join-Path $target 'Uninstall Copick.exe') -ArgumentList '/S', "_?=$target" -Wait -PassThru
+          if ($un.ExitCode -ne 0) { Write-Error "uninstaller exit code $($un.ExitCode)" }
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { Write-Error 'uninstall left Copick.exe behind' }
+          Write-Host 'installer, launch-at-login and uninstall checks OK'
+
       - uses: actions/upload-artifact@v7
         with:
           name: copick-${{ matrix.os }}
           path: |
             app/release/*.zip
+            app/release/*.exe
             app/release/*.yml
           if-no-files-found: error
           retention-days: 14
