@@ -246,6 +246,9 @@ if (!isMac && !isWindows) {
   app.quit();
 } else {
   app.setName('Copick');
+  // Default paths were derived from package.json name ('copick-app') before setName ran.
+  app.setPath('userData', path.join(app.getPath('appData'), 'Copick'));
+  app.setAppLogsPath();
   if (isWindows) app.setAppUserModelId('local.copick.app');
   app.on('second-instance', () => { if (tray) showSettings(); });
   app.on('activate', (_event, hasVisibleWindows) => {

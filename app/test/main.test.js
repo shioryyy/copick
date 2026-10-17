@@ -53,7 +53,7 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     setContextMenu(menu) { this.menu = menu; }
   }
   const app = Object.assign(new EventEmitter(), {
-    requestSingleInstanceLock: () => true, setName() {}, setAppUserModelId() {},
+    requestSingleInstanceLock: () => true, setName() {}, setAppUserModelId() {}, setPath() {}, setAppLogsPath() {},
     whenReady: () => Promise.resolve(), getPath: () => '/fake', quit() {}, exit() {}, getVersion: () => 'test'
   });
   const electron = { app, BrowserWindow: Window, Tray, Menu: { buildFromTemplate: value => value },

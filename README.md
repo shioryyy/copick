@@ -51,7 +51,7 @@ CI 在 macOS arm64 和 Windows x64 runner 上执行以上检查，并对打包�
 
 ## 安全边界
 
-渲染器启用 context isolation、sandbox、禁用 nodeIntegration；只加载本地页面，禁止外部导航、webview、权限和非 file 请求。应用无网络、无选中文字历史；默认不写诊断日志。排查“没有弹窗”时，可从终端以 `--diagnostics` 启动，日志位于 Electron 的 `logs/selection.log`，只记录监听状态、事件计数、文本长度和过滤原因，不记录选中文字、按键内容或程序名。
+渲染器启用 context isolation、sandbox、禁用 nodeIntegration；只加载本地页面，禁止外部导航、webview、权限和非 file 请求。应用无网络、无选中文字历史；默认不写诊断日志。排查“没有弹窗”时，可从终端以 `--diagnostics` 启动，日志位于 `logs/selection.log`（Windows 为 `%APPDATA%\Copick\logs`，macOS 为 `~/Library/Logs/Copick`；配置文件在同名用户数据目录下的 `config.json`），只记录监听状态、事件计数、文本长度和过滤原因，不记录选中文字、按键内容或程序名。
 
 ## 许可
 
