@@ -2,6 +2,8 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。发布流程：更新本文件的对应版本小节，把 `app/package.json` 的 `version` 改成同一版本号，推送 `v<版本号>` tag，`.github/workflows/release.yml` 会构建、校验并创建 GitHub Release；版本号含 `-` 的自动标为 Pre-release。
 
+## [Unreleased]
+
 ## [0.3.0-beta.2] - 2026-10-18
 
 ### 修复

@@ -6,6 +6,10 @@
 - 统一 Electron + `selection-hook` 2.1.1 主路线，当前支持 macOS arm64 与 Windows x64。
 - Windows 提供 NSIS 安装版（按用户安装，无需管理员）和便携 ZIP；macOS 提供 ZIP。两端都可在设置或托盘开启开机自动启动。
 
+## 下载
+
+预编译版本见 [GitHub Releases](https://github.com/shioryyy/copick/releases)：Windows x64 提供 NSIS 安装版（`Copick-Setup-*.exe`）与便携 ZIP，macOS arm64 提供 ZIP。产物未代码签名，首次运行可能被系统拦截；校验值随 Release 一同提供。
+
 ## 目录
 
 | 路径 | 说明 |
