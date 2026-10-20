@@ -40,6 +40,7 @@ npm run dist:win
 - Windows：`programName` 是可执行程序名（例如 `code.exe`）。默认开启剪贴板回退，可在设置中关闭。Windows 坐标在进入 Electron bounds 前使用 `screenToDipPoint`；macOS 坐标直接使用 Cocoa screen points，不做该转换。
 - 两个平台都在原生过滤器和 JS 层过滤。Windows 常见终端、密码管理器和 Copick 有平台内置完全黑名单；macOS Terminal/iTerm2（`com.apple.terminal` / `com.googlecode.iterm2`）及 IDE 只禁止快捷键回退，允许直接无障碍取词。过滤标识统一小写。
 - 回退可能临时修改剪贴板，原生库尽力备份/恢复但不保证私有格式、并发复制或剪贴板管理器状态。关闭回退可避免该影响。
+- 开机启动默认关闭，设置页和托盘都可开关。macOS 走系统登录项（macOS 13+ 的 BTM/SMAppService），系统可能要求用户在「系统设置 > 通用 > 登录项」中批准；未签名或未公证的构建可能登记失败，设置页会直接说明原因。Windows 写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不需要管理员权限。当前 Windows 发布的是便携 ZIP，登录项记录解压后的绝对路径，移动或改名后应用会在下次启动时重新登记；被任务管理器禁用的启动项不会在启动时被强行改回。开发模式（未打包）不写入系统登录项。
 
 复制前前台身份核验尚未完整实现：selection-hook 2.1.1 没有只读前台身份 API，鼠标事件不含来源标识；`getCurrentSelection()` 会进入 AX → 快捷键回退管线，不能安全地当作身份查询。现有按键/鼠标/超时清理无法覆盖系统或程序主动切换前台后仍有效的旧 token，完整修复需要原生只读前台接口。关闭回退再查询会拒绝仅能通过回退取词的应用，本版未采用这一功能退化方案。
 

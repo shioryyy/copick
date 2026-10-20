@@ -1,10 +1,13 @@
 'use strict';
 const button = document.getElementById('copy');
+const label = document.getElementById('copy-label');
 let token = null;
 window.copickPopup.onSelection(value => {
   token = value;
   button.disabled = false;
-  button.textContent = '复制';
+  button.dataset.state = 'ready';
+  button.setAttribute('aria-label', '复制选中的文字');
+  label.textContent = '复制';
 });
 button.addEventListener('pointerdown', event => event.preventDefault());
 button.addEventListener('click', async () => {
@@ -13,7 +16,12 @@ button.addEventListener('click', async () => {
   button.disabled = true;
   try {
     const ok = await window.copickPopup.copy(attempted);
-    if (!ok && token === attempted) button.textContent = '重试';
-  } catch { if (token === attempted) button.textContent = '重试'; }
-  finally { if (token === attempted) button.disabled = false; }
+    if (token !== attempted) return;
+    if (ok) {
+      button.dataset.state = 'copied';
+      button.setAttribute('aria-label', '已复制');
+      label.textContent = '已复制';
+    } else label.textContent = '重试';
+  } catch { if (token === attempted) label.textContent = '重试'; }
+  finally { if (token === attempted) button.disabled = button.dataset.state === 'copied'; }
 });

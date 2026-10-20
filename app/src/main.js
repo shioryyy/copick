@@ -25,8 +25,10 @@ function hidePopup() {
   if (popup && !popup.isDestroyed()) popup.hide();
 }
 function state() {
+  const login = loginItemState();
   return { ...config, protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
     accessibility: permissionGranted, permissionMessage: permissionGranted === false ? permissionMessage : null,
+    loginItemActive: login.active, loginItemMessage: login.message,
     running: Boolean(hook?.isRunning()), error: failure, configPath: configFile };
 }
 function publish() {
@@ -67,6 +69,55 @@ function openAccessibilitySettings() {
   if (!isMac) return;
   shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
 }
+function openLoginItemsSettings() {
+  if (!isMac) return;
+  shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
+}
+// Windows stores one Run value per app; macOS 13+ answers through login item status instead.
+// Both resolve the executable path, so reads and writes must share the same options.
+const loginItemOptions = () => (isWindows ? { path: process.execPath, args: [] } : {});
+function readLoginItem() {
+  try { return app.getLoginItemSettings(loginItemOptions()) || {}; } catch { return {}; }
+}
+function loginItemEntry(settings) {
+  const target = String(process.execPath).toLowerCase();
+  return (settings.launchItems || [])
+    .find(item => typeof item.path === 'string' && item.path.toLowerCase() === target) || null;
+}
+// Windows keeps the Run value while Task Manager reports the entry as disabled, so openAtLogin alone lies.
+function loginItemActive(settings = readLoginItem()) {
+  return isWindows ? Boolean(settings.executableWillLaunchAtLogin) : settings.status === 'enabled';
+}
+function loginItemState() {
+  if (!app.isPackaged) return { active: false, message: '开发模式运行，不写入系统登录项；打包后生效。' };
+  const settings = readLoginItem();
+  const active = loginItemActive(settings);
+  if (active || !config?.loginItem) return { active, message: null };
+  if (isWindows) {
+    return { active: false, message: loginItemEntry(settings)
+      ? '启动项已被系统禁用，请在「任务管理器 > 启动应用」中重新启用。'
+      : '系统尚未登记启动项，请重新保存设置。' };
+  }
+  return { active: false, message: settings.status === 'requires-approval'
+    ? '需要在「系统设置 > 通用 > 登录项」中允许 Copick，否则不会开机启动。'
+    : '系统未登记该登录项；未签名或未公证的构建可能无法生效。' };
+}
+function writeLoginItem(openAtLogin) { app.setLoginItemSettings({ openAtLogin, ...loginItemOptions() }); }
+function applyLoginItem() {
+  // An unpackaged run would register the Electron binary instead of Copick.
+  if (!app.isPackaged) return;
+  try {
+    const settings = readLoginItem();
+    if (!config.loginItem) {
+      if (settings.openAtLogin || loginItemActive(settings) || loginItemEntry(settings)) writeLoginItem(false);
+      return;
+    }
+    // Re-assert a moved or renamed portable folder, but leave an OS-side disable for the user to undo.
+    const registered = isWindows ? Boolean(loginItemEntry(settings))
+      : settings.status === 'requires-approval' || loginItemActive(settings);
+    if (!registered) writeLoginItem(true);
+  } catch (error) { diag('login-item-error', errorMetadata(error)); }
+}
 const counts = { mouseDown: 0, mouseUp: 0, selections: 0, shown: 0, dropped: 0 };
 function gateState() {
   return { ready, paused: config?.paused, running: hook?.isRunning(),
@@ -99,6 +150,7 @@ function updateConfig(next) {
   hidePopup();
   config = saved;
   failure = null;
+  applyLoginItem();
   try {
     applyHook();
   } catch (error) {
@@ -128,10 +180,16 @@ function secureWindow(options) {
 function showSettings() {
   refreshPermissions();
   hidePopup();
-  if (isMac) app.dock?.show();
+  if (isMac && app.dock) {
+    app.dock.show().then(() => {
+      if (settings && !settings.isDestroyed()) {
+        app.dock.setIcon(path.join(__dirname, '..', 'assets', 'icon.png'));
+      }
+    }).catch(error => diag('dock-show-error', errorMetadata(error)));
+  }
   if (settings && !settings.isDestroyed()) { settings.show(); settings.focus(); return; }
-  settings = secureWindow({ width: 500, height: 610, minWidth: 460, minHeight: 540,
-    title: 'Copick 设置', backgroundColor: '#f6f8fc', autoHideMenuBar: true });
+  settings = secureWindow({ width: 560, height: 760, minWidth: 460, minHeight: 540,
+    title: 'Copick 设置', backgroundColor: '#f5f6f8', autoHideMenuBar: true });
   settings.loadFile(page('settings'));
   settings.on('focus', refreshPermissions);
   settings.on('closed', () => {
@@ -141,6 +199,7 @@ function showSettings() {
 }
 function rebuildTray() {
   if (!tray) return;
+  const login = loginItemState();
   tray.setToolTip(`Copick · ${permissionGranted === false ? '需要辅助功能权限' : failure ? '需要检查设置' : config.paused ? '已暂停' : '运行中'}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Copick · 本地划词复制', enabled: false },
@@ -148,6 +207,8 @@ function rebuildTray() {
       click: item => safeUpdate({ ...config, paused: item.checked }) },
     { label: `启用快捷键回退（${isMac ? '⌘C' : 'Ctrl+C'}）`, type: 'checkbox', checked: config.clipboardFallback,
       click: item => safeUpdate({ ...config, clipboardFallback: item.checked }) },
+    { label: `开机启动${config.loginItem && !login.active ? '（未生效）' : ''}`, type: 'checkbox', checked: config.loginItem,
+      click: item => safeUpdate({ ...config, loginItem: item.checked }) },
     { type: 'separator' },
     { label: lastProgram ? `禁用最近取词应用：${lastProgram}` : '禁用最近取词应用',
       enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
@@ -184,13 +245,25 @@ function installIPC() {
     openAccessibilitySettings();
     return true;
   });
+  ipcMain.handle('settings:open-login-items', event => {
+    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    openLoginItemsSettings();
+    return true;
+  });
   ipcMain.handle('popup:copy', (event, token) => {
-    if (!trusted(event, popup, 'popup') || !current || token !== current.token ||
+    if (!trusted(event, popup, 'popup') || !current || current.copied || token !== current.token ||
         config.paused || (isMac && permissionGranted !== true) || !hook.isRunning() || failure ||
         Date.now() > current.expires || isBlocked(current.program, config)) return false;
     // Native method serializes against fallback clipboard transactions; Electron.writeText does not.
     const success = hook.writeToClipboard(current.text);
-    if (success) hidePopup();
+    if (success) {
+      current.text = '';
+      current.copied = true;
+      clearTimeout(expiry);
+      expiry = setTimeout(() => {
+        if (current?.token === token) hidePopup();
+      }, 650);
+    }
     return success;
   });
 }
@@ -247,6 +320,7 @@ if (!isMac && !isWindows) {
   app.on('window-all-closed', () => {});
   app.on('before-quit', () => { hidePopup(); if (hook) hook.cleanup(); if (tray) tray.destroy(); });
   app.whenReady().then(() => {
+    if (isMac) app.dock?.setIcon(path.join(__dirname, '..', 'assets', 'icon.png'));
     if (diagnosticsEnabled(process.argv)) diagnostics = createDiagnostics(app.getPath('logs'));
     diag('startup', { appVersion: app.getVersion(), hookVersion: '2.1.1', electronVersion: process.versions.electron,
       nodeVersion: process.versions.node, platform: process.platform, arch: process.arch }, 0);
@@ -268,6 +342,7 @@ if (!isMac && !isWindows) {
     const loaded = loadConfig(configFile);
     config = loaded.config;
     failure = loaded.error;
+    applyLoginItem();
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {

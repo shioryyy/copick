@@ -1,23 +1,98 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="settings.css"><title>Copick 设置</title></head>
-<body><main>
-<header><h1>Copick</h1><p>选中文字，点击复制。</p><span id="status">正在读取设置…</span></header>
-<form id="settings">
-<label class="toggle"><input id="paused" type="checkbox"><span>暂停划词</span></label>
-<label class="toggle"><input id="fallback" type="checkbox"><span>启用快捷键回退</span></label>
-<p class="help">取词失败时模拟复制，会临时改动剪贴板，也可能被剪贴板历史记录。</p>
-<section><h2><label for="blacklist">应用黑名单</label></h2>
-<p id="blacklist-help" class="help"></p>
-<textarea id="blacklist" rows="3" spellcheck="false"></textarea>
-<p id="recent" class="help"></p>
-</section>
-<section id="mac-accessibility" hidden>
-<div class="permission-row"><span>辅助功能：<span id="accessibility-status"></span></span><button id="open-accessibility" class="secondary" type="button">打开设置</button></div>
-<p id="accessibility-help" class="help" hidden>授权后自动恢复监听，无需重启。</p>
-</section>
-<div class="actions"><button type="submit">保存设置</button><span id="message" role="status" aria-live="polite"></span></div>
-</form>
-</main><script src="settings.js"></script></body></html>
+<link rel="stylesheet" href="settings.css">
+<title>Copick 设置</title>
+</head>
+<body>
+<main>
+  <header class="app-header">
+    <img class="app-icon" src="../assets/icon.png" width="44" height="44" alt="">
+    <div><h1>Copick <span>设置</span></h1><p>选中文字，轻点复制。</p></div>
+    <span class="local-label">仅在本机运行</span>
+  </header>
+
+  <section class="status-panel" id="status-panel" data-tone="neutral" aria-label="运行状态">
+    <div class="status-heading"><span class="status-dot" aria-hidden="true"></span><h2 id="status" role="status">正在读取设置…</h2></div>
+    <p id="status-description">正在确认选区监听与系统权限。</p>
+    <div id="mac-accessibility" class="permission-row" hidden>
+      <span class="permission-label">辅助功能 <span id="accessibility-status"></span></span>
+      <div class="button-group">
+        <button id="open-accessibility" class="secondary compact" type="button">打开系统设置</button>
+        <button id="check-accessibility" class="text-button compact" type="button">重新检查</button>
+      </div>
+    </div>
+  </section>
+
+  <form id="settings">
+    <fieldset id="settings-fields" disabled>
+      <section class="settings-section" aria-labelledby="general-title">
+        <h2 id="general-title" class="section-title">基本设置</h2>
+        <div class="settings-card">
+          <label class="setting-row" for="paused">
+            <span class="setting-copy"><span class="setting-title">暂停划词</span><span id="paused-help" class="help">暂停后不再显示复制浮窗，随时可以恢复。</span></span>
+            <input id="paused" class="switch" type="checkbox" role="switch" aria-describedby="paused-help">
+          </label>
+          <div class="setting-block">
+            <label class="setting-row" for="login-item">
+              <span class="setting-copy"><span class="setting-title">登录后自动启动</span><span class="help">在后台启动 Copick，不打开设置窗口。</span></span>
+              <input id="login-item" class="switch" type="checkbox" role="switch" aria-describedby="login-item-help">
+            </label>
+            <div id="login-item-status-row" class="login-status">
+              <span id="login-item-status" class="badge" data-tone="neutral">正在读取</span>
+              <button id="open-login-items" class="text-button compact" type="button" hidden>登录项设置 ↗</button>
+            </div>
+            <p id="login-item-help" class="help inset-help"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="compatibility-title">
+        <h2 id="compatibility-title" class="section-title">取词与兼容性</h2>
+        <div class="settings-card">
+          <label class="setting-row" for="fallback">
+            <span class="setting-copy"><span class="setting-title">取词失败时尝试快捷键复制</span><span id="fallback-help" class="help">模拟复制会临时改动剪贴板，也可能被剪贴板历史记录。</span></span>
+            <input id="fallback" class="switch" type="checkbox" role="switch" aria-describedby="fallback-help">
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="exclusions-title">
+        <h2 id="exclusions-title" class="section-title">排除应用</h2>
+        <div class="settings-card exclusions-card">
+          <p class="help section-help">在这些应用中不显示复制浮窗。</p>
+          <ul id="app-list" class="app-list" aria-label="已排除的应用"></ul>
+          <p id="empty-list" class="empty-list">尚未添加排除应用</p>
+          <div id="recent-row" class="recent-row" hidden>
+            <div class="recent-copy"><span class="help">最近取词应用</span><span id="recent" class="program-name"></span></div>
+            <button id="add-recent" class="secondary compact" type="button">添加排除</button>
+          </div>
+          <details id="manual-entry">
+            <summary>手动编辑应用标识</summary>
+            <label for="blacklist" id="blacklist-help" class="help input-label"></label>
+            <textarea id="blacklist" rows="3" spellcheck="false" autocapitalize="off" aria-describedby="blacklist-error"></textarea>
+          </details>
+          <p id="blacklist-error" class="field-error" role="alert" hidden></p>
+          <details class="built-in-rules">
+            <summary>查看内置保护规则</summary>
+            <p class="help">以下应用已自动排除，无需重复添加。</p>
+            <p id="protected-programs" class="programs"></p>
+            <p class="help">以下应用只通过系统接口取词，不使用快捷键回退。</p>
+            <p id="no-clipboard-programs" class="programs"></p>
+          </details>
+        </div>
+      </section>
+      <p class="privacy-note">不上传选中文字，不保存取词历史。</p>
+    </fieldset>
+    <div class="actions">
+      <span id="message" role="status" aria-live="polite">正在读取设置…</span>
+      <button id="save" type="submit" disabled>保存设置</button>
+    </div>
+  </form>
+</main>
+<script src="settings.js"></script>
+</body>
+</html>

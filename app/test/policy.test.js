@@ -7,7 +7,7 @@ const path = require('node:path');
 const { NO_CLIPBOARD, normalizeList, validateConfig, isBlocked, popupBounds, validPoint } = require('../src/policy');
 const { loadConfig, saveConfig } = require('../src/config');
 const isMac = process.platform === 'darwin';
-const config = { paused: false, clipboardFallback: !isMac, blacklist: [] };
+const config = { paused: false, clipboardFallback: !isMac, loginItem: false, blacklist: [] };
 
 test('platform defaults and identifiers match selection-hook programName', () => {
   if (isMac) {
@@ -50,6 +50,13 @@ test('blacklist validation rejects paths, wildcards and invalid config', () => {
   }
   assert.throws(() => validateConfig({ ...config, clipboardFallback: 'true' }));
 });
+test('login item is optional for older config files and rejects non-boolean values', () => {
+  const { loginItem, ...legacy } = config;
+  assert.equal(loginItem, false);
+  assert.deepEqual(validateConfig(legacy), config);
+  assert.equal(validateConfig({ ...config, loginItem: true }).loginItem, true);
+  assert.throws(() => validateConfig({ ...config, loginItem: 'true' }));
+});
 test('work area placement handles negative monitors and bottom edges', () => {
   assert.deepEqual(popupBounds({ x: -10, y: 1070 }, { x: -1920, y: 0, width: 1920, height: 1080 }),
     { x: -88, y: 1018, width: 88, height: 40 });
@@ -62,7 +69,8 @@ test('settings round trip, defaults, and corrupt-file fail-closed behavior', t =
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'nested', 'config.json');
   assert.deepEqual(loadConfig(file).config, config);
-  const disabled = { paused: true, clipboardFallback: false, blacklist: [isMac ? 'com.example.app' : 'example.exe'] };
+  const disabled = { paused: true, clipboardFallback: false, loginItem: true,
+    blacklist: [isMac ? 'com.example.app' : 'example.exe'] };
   saveConfig(file, disabled);
   assert.deepEqual(loadConfig(file).config, disabled);
   assert.throws(() => saveConfig(file, { ...config, blacklist: [isMac ? '*' : '*'] }));

@@ -17,6 +17,10 @@
 
 平台内置黑名单使用 selection-hook 实际 programName：macOS 使用 bundle identifier，Windows 使用 `.exe` 名称。Windows 常见终端、密码管理器和自身完全跳过；macOS Terminal/iTerm2（本机 Info.plist 核实 `com.apple.Terminal` / `com.googlecode.iterm2`）与 VS Code、Cursor、Windsurf 等 IDE 仅加入 clipboard filter，禁止快捷键回退而保留直接无障碍取词。自定义名单经过平台对应格式校验，按标识片段匹配。
 
+## 开机启动
+
+`loginItem` 是配置字段，默认关闭，经 `validateConfig` 校验；旧配置文件缺该字段时按 false 处理，不触发失败闭锁。启动时和每次保存后各同步一次：Windows 用 `app.setLoginItemSettings` 写 `HKCU\...\Run`，读写共用 `{ path: process.execPath, args: [] }`，因为该平台按字符串比较命令行；便携包移动或改名后启动时会用当前路径重新登记，已被任务管理器禁用的项不覆盖用户选择。macOS 13+ 以登录项状态判断（`status === 'enabled'`），`requires-approval` 时只提示并保留待批状态，不重复登记。Windows 的状态读取使用 `executableWillLaunchAtLogin` 与 `launchItems[].enabled`，因为 Run 值在系统禁用后依然存在，只看 `openAtLogin` 会误报。`app.isPackaged` 为 false 时不写入系统登录项，避免注册 Electron 二进制。
+
 ## 浮窗与安全
 
 主进程保留选中文字，渲染器只收到短期 token。macOS 浮窗设置 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`，使用不可聚焦窗口与 `showInactive()` 避免激活或主动切换 Space；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。

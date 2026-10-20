@@ -11,6 +11,7 @@ if (location.pathname.endsWith('/popup.html')) {
     read: () => ipcRenderer.invoke('settings:read'),
     save: value => ipcRenderer.invoke('settings:save', value),
     onState: callback => ipcRenderer.on('settings:state', (_event, value) => callback(value)),
-    openAccessibility: () => ipcRenderer.invoke('settings:open-accessibility')
+    openAccessibility: () => ipcRenderer.invoke('settings:open-accessibility'),
+    openLoginItems: () => ipcRenderer.invoke('settings:open-login-items')
   });
 }
