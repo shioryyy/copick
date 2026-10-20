@@ -1,7 +1,7 @@
 'use strict';
 const paused = document.getElementById('paused');
 const fallback = document.getElementById('fallback');
-const loginItem = document.getElementById('login-item');
+const launchAtLogin = document.getElementById('login-item');
 const blacklist = document.getElementById('blacklist');
 const message = document.getElementById('message');
 const save = document.getElementById('save');
@@ -13,10 +13,10 @@ function entries() {
 }
 function draft() {
   return { paused: paused.checked, clipboardFallback: fallback.checked,
-    loginItem: loginItem.checked, blacklist: entries() };
+    launchAtLogin: launchAtLogin.checked, blacklist: entries() };
 }
 function signature(value) {
-  return JSON.stringify([value.paused, value.clipboardFallback, value.loginItem,
+  return JSON.stringify([value.paused, value.clipboardFallback, value.launchAtLogin,
     [...new Set(value.blacklist.map(name => name.trim().toLowerCase()))]]);
 }
 function feedback(text, tone = 'neutral') {
@@ -26,7 +26,7 @@ function feedback(text, tone = 'neutral') {
 function updateSave() {
   const needsRetry = latest && (latest.error ||
     (!latest.paused && !latest.running && latest.accessibility !== false) ||
-    (latest.loginItem && !latest.loginItemActive));
+    (latest.launchAtLogin && !latest.loginItemActive));
   save.disabled = !latest || saving || (!dirty && !needsRetry);
   save.textContent = saving ? '正在保存…' : '保存设置';
 }
@@ -36,16 +36,16 @@ function clearFieldError() {
 }
 function updateLoginStatus() {
   if (!latest) return;
-  const pending = loginItem.checked !== latest.loginItem;
+  const pending = launchAtLogin.checked !== latest.launchAtLogin;
   const badge = document.getElementById('login-item-status');
-  badge.textContent = pending ? '待保存' : latest.loginItem
+  badge.textContent = pending ? '待保存' : latest.launchAtLogin
     ? latest.loginItemActive ? '已生效' : '未生效，需检查系统设置' : '已关闭';
-  badge.dataset.tone = pending || (latest.loginItem && !latest.loginItemActive) ? 'warning'
-    : latest.loginItem ? 'positive' : 'neutral';
+  badge.dataset.tone = pending || (latest.launchAtLogin && !latest.loginItemActive) ? 'warning'
+    : latest.launchAtLogin ? 'positive' : 'neutral';
   document.getElementById('login-item-help').textContent = pending
     ? '保存后应用此更改，系统实际状态将在这里显示。' : latest.loginItemMessage || '';
   document.getElementById('open-login-items').hidden = latest.accessibility === null ||
-    (!latest.loginItem && !latest.loginItemActive);
+    (!latest.launchAtLogin && !latest.loginItemActive);
 }
 function updateRecent() {
   if (!latest) return;
@@ -97,7 +97,7 @@ function render(value, force = false) {
   if (!dirty || force) {
     paused.checked = value.paused;
     fallback.checked = value.clipboardFallback;
-    loginItem.checked = value.loginItem;
+    launchAtLogin.checked = value.launchAtLogin;
     blacklist.value = value.blacklist.join('\n');
     dirty = false;
     renderApps();

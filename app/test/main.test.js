@@ -11,7 +11,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 // Run the real main-process handlers with fake Electron/native boundaries: no desktop hooks.
 async function harness({ platform = 'darwin', granted = true, paused = false, loadedError = null,
-  loginItem = false, packaged = true, login = {} } = {}) {
+  launchAtLogin = false, packaged = true, login = {}, diagnostics = false } = {}) {
   const policyContext = { module: { exports: {} }, process: { platform } };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'policy.js'), 'utf8'), policyContext);
   const policy = policyContext.module.exports;
@@ -19,9 +19,10 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   // Fake executable paths; the login item code only compares them as strings.
   const execPath = platform === 'win32' ? 'C:/Copick/Copick.exe' : '/Applications/Copick.app/Contents/MacOS/Copick';
   const loginCalls = [];
-  const loginState = { openAtLogin: login.openAtLogin ?? loginItem, entryEnabled: login.entryEnabled ?? true,
+  const loginState = { openAtLogin: login.openAtLogin ?? launchAtLogin, entryEnabled: login.entryEnabled ?? true,
     path: login.path ?? execPath, status: login.status ?? null };
-  let persisted = { paused, clipboardFallback: false, loginItem, blacklist: [] };
+  const paths = { appData: '/fake', userData: '/fake/copick-app', logs: '/fake/copick-app/logs' };
+  let persisted = { paused, clipboardFallback: false, launchAtLogin, blacklist: [] };
   let saveFails = false, startFails = false;
   const handlers = new Map(), windows = [], intervals = [], timeouts = new Map();
   let timerId = 0;
@@ -53,7 +54,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     hide() { this.hidden = true; }
     show() {} focus() {} loadFile() {}
     showInactive() { this.hidden = false; calls.inactive = true; }
-    setAlwaysOnTop() {}
+    moveTop() { calls.moveTop = (calls.moveTop || 0) + 1; }
+    setAlwaysOnTop(...args) { calls.alwaysOnTop = args; }
     setVisibleOnAllWorkspaces(...args) { calls.workspaces.push(args); }
     setBounds(bounds) { this.bounds = bounds; }
     getBounds() { return this.bounds; }
@@ -65,20 +67,27 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   }
   const app = Object.assign(new EventEmitter(), {
     requestSingleInstanceLock: () => true, setName() {}, setAppUserModelId() {}, isPackaged: packaged,
-    whenReady: () => Promise.resolve(), getPath: () => '/fake', quit() {}, exit() {}, getVersion: () => 'test',
+    setPath(name, value) { paths[name] = value; },
+    setAppLogsPath() { paths.logs = path.join(paths.userData, 'logs'); calls.logsPath = paths.logs; },
+    whenReady: () => Promise.resolve(), getPath: name => paths[name], quit() {}, exit() {}, getVersion: () => 'test',
     dock: { setIcon: value => { calls.dockIcon = value; },
       show: () => new Promise(resolve => { calls.finishDockShow = () => { calls.dockIcon = 'Electron'; resolve(); }; }),
       hide() {} },
-    getLoginItemSettings: () => platform === 'darwin'
-      ? { openAtLogin: loginState.openAtLogin,
-        status: loginState.status || (loginState.openAtLogin ? 'enabled' : 'not-registered') }
-      : { openAtLogin: loginState.openAtLogin,
-        executableWillLaunchAtLogin: loginState.openAtLogin && loginState.entryEnabled,
-        launchItems: loginState.openAtLogin
-          ? [{ name: 'local.copick.app', path: loginState.path, args: [], scope: 'user', enabled: loginState.entryEnabled }]
-          : [] },
+    getLoginItemSettings: options => {
+      calls.loginReadOptions = options;
+      return platform === 'darwin'
+        ? { openAtLogin: loginState.openAtLogin,
+          status: loginState.status || (loginState.openAtLogin ? 'enabled' : 'not-registered') }
+        : { openAtLogin: loginState.openAtLogin && loginState.path.toLowerCase() === execPath.toLowerCase(),
+          executableWillLaunchAtLogin: loginState.openAtLogin && loginState.entryEnabled &&
+            loginState.path.toLowerCase() === execPath.toLowerCase(),
+          launchItems: loginState.openAtLogin
+            ? [{ name: 'Copick', path: loginState.path, args: [], scope: 'user', enabled: loginState.entryEnabled }]
+            : [] };
+    },
     setLoginItemSettings: settings => {
       loginCalls.push(settings);
+      calls.loginItems = (calls.loginItems || []).concat(settings);
       loginState.status = null;
       loginState.openAtLogin = Boolean(settings.openAtLogin);
       if (settings.openAtLogin && platform === 'win32') {
@@ -100,9 +109,12 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     clearTimeout: id => timeouts.delete(id),
     setInterval: fn => { intervals.push(fn); return { unref() {} }; },
     require: name => name === 'electron' ? electron : name === 'selection-hook' ? Hook : name === './policy' ? policy :
-      name === './config' ? { loadConfig: () => ({ config: persisted, error: loadedError }),
+      name === './config' ? { loadConfig: file => { calls.configPath = file; return { config: persisted, error: loadedError }; },
         saveConfig: (_file, value) => { if (saveFails) throw new Error('disk full'); persisted = policy.validateConfig(value); return persisted; } } :
-      name === './diagnostics' ? { diagnosticsEnabled: () => false, errorMetadata: () => ({}) } : require(name) };
+      name === './diagnostics' ? { diagnosticsEnabled: () => diagnostics, errorMetadata: () => ({}),
+        createDiagnostics: () => ({ log: (event, metadata) => {
+          calls.diagnostics = calls.diagnostics || []; calls.diagnostics.push([event, metadata]);
+        } }) } : require(name) };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context);
   await Promise.resolve();
   function invoke(name, value) {
@@ -113,7 +125,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   return { calls, windows, policy, app, hook: Hook.instance, tray: Tray.instance, invoke, open,
     loginCalls, loginState, execPath, timeouts,
     get persisted() { return persisted; }, grant(value) { granted = value; },
-    failSave() { saveFails = true; }, failStart() { startFails = true; }, tick() { intervals.forEach(fn => fn()); } };
+    failSave() { saveFails = true; }, failStart() { startFails = true; }, tick() { intervals.forEach(fn => fn()); },
+    setLoginItem(value) { Object.assign(loginState, value); } };
 }
 
 test('invalid settings and failed persistence leave config and running hook untouched', async () => {
@@ -192,10 +205,13 @@ test('macOS popup spans fullscreen workspaces and still shows inactive; Windows 
     }
     const popup = h.windows[0];
     assert.equal(popup.options.focusable, false);
+    assert.equal(popup.options.alwaysOnTop, true);
+    assert.deepEqual(plain(h.calls.alwaysOnTop), [true, 'pop-up-menu']);
     popup.webContents.emit('did-finish-load');
     h.hook.emit('text-selection', { text: 'sample', programName: platform === 'darwin' ? 'com.apple.TextEdit' : 'notepad.exe',
       mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
     assert.equal(h.calls.inactive, true);
+    assert.equal(h.calls.moveTop, 1);
   }
 });
 test('successful popup copy shows feedback before hiding and rejects duplicate clicks', async () => {
@@ -285,16 +301,16 @@ test('popup activation does not open settings; Dock activation without windows d
 });
 
 test('Windows heals a moved portable folder and reports the live Task Manager state', async () => {
-  const moved = await harness({ platform: 'win32', loginItem: true,
+  const moved = await harness({ platform: 'win32', launchAtLogin: true,
     login: { openAtLogin: true, path: 'C:/Old/Copick.exe' } });
-  assert.deepEqual(plain(moved.loginCalls), [{ openAtLogin: true, path: moved.execPath, args: [] }]);
+  assert.deepEqual(plain(moved.loginCalls), [{ openAtLogin: true, name: 'Copick', path: moved.execPath, args: [] }]);
   moved.open();
   const state = moved.invoke('settings:read');
-  assert.equal(state.loginItem, true);
+  assert.equal(state.launchAtLogin, true);
   assert.equal(state.loginItemActive, true);
   assert.equal(state.loginItemMessage, null);
 
-  const disabled = await harness({ platform: 'win32', loginItem: true,
+  const disabled = await harness({ platform: 'win32', launchAtLogin: true,
     login: { openAtLogin: true, entryEnabled: false } });
   assert.equal(disabled.loginCalls.length, 0);
   disabled.open();
@@ -306,25 +322,25 @@ test('Windows heals a moved portable folder and reports the live Task Manager st
 test('saving the toggle registers and removes the login item, unpackaged runs stay out', async () => {
   const h = await harness({ platform: 'win32' });
   h.open();
-  assert.equal(h.invoke('settings:save', { ...h.persisted, loginItem: true }).ok, true);
-  assert.deepEqual(plain(h.loginCalls.at(-1)), { openAtLogin: true, path: h.execPath, args: [] });
-  assert.equal(h.persisted.loginItem, true);
-  assert.equal(h.invoke('settings:save', { ...h.persisted, loginItem: false }).ok, true);
-  assert.deepEqual(plain(h.loginCalls.at(-1)), { openAtLogin: false, path: h.execPath, args: [] });
+  assert.equal(h.invoke('settings:save', { ...h.persisted, launchAtLogin: true }).ok, true);
+  assert.deepEqual(plain(h.loginCalls.at(-1)), { openAtLogin: true, name: 'Copick', path: h.execPath, args: [] });
+  assert.equal(h.persisted.launchAtLogin, true);
+  assert.equal(h.invoke('settings:save', { ...h.persisted, launchAtLogin: false }).ok, true);
+  assert.deepEqual(plain(h.loginCalls.at(-1)), { openAtLogin: false, name: 'Copick', path: h.execPath, args: [] });
 
-  const dev = await harness({ packaged: false, loginItem: true });
+  const dev = await harness({ packaged: false, launchAtLogin: true });
   assert.equal(dev.loginCalls.length, 0);
   dev.open();
   assert.match(dev.invoke('settings:read').loginItemMessage, /开发模式/);
 });
 
 test('macOS reads login item status, leaves a pending approval alone, cleans up leftovers', async () => {
-  const steady = await harness({ platform: 'darwin', loginItem: true, login: { openAtLogin: true } });
+  const steady = await harness({ platform: 'darwin', launchAtLogin: true, login: { openAtLogin: true } });
   assert.equal(steady.loginCalls.length, 0);
   steady.open();
   assert.equal(steady.invoke('settings:read').loginItemActive, true);
 
-  const pending = await harness({ platform: 'darwin', loginItem: true, login: { status: 'requires-approval' } });
+  const pending = await harness({ platform: 'darwin', launchAtLogin: true, login: { status: 'requires-approval' } });
   assert.equal(pending.loginCalls.length, 0);
   pending.open();
   assert.equal(pending.invoke('settings:read').loginItemActive, false);
@@ -332,5 +348,100 @@ test('macOS reads login item status, leaves a pending approval alone, cleans up 
   assert.equal(pending.invoke('settings:open-login-items'), true);
 
   const leftover = await harness({ platform: 'darwin', login: { openAtLogin: true } });
-  assert.deepEqual(plain(leftover.loginCalls), [{ openAtLogin: false }]);
+  assert.deepEqual(plain(leftover.loginCalls), [{ openAtLogin: false, name: 'Copick' }]);
+});
+
+test('IPC sender check compares decoded page paths, not URL spelling', async () => {
+  const h = await harness({ platform: process.platform === 'win32' ? 'win32' : 'darwin' }); h.open();
+  const settings = h.windows.find(window => window.options.title);
+  const href = settings.webContents.mainFrame.url;
+  // Chromium may spell the same file URL differently from Node: percent-encoding of
+  // non-ASCII or space-containing install paths, or drive-letter case on Windows.
+  settings.webContents.mainFrame.url = href.replace(/settings\.html$/, 'settings%2Ehtml');
+  assert.ok(h.invoke('settings:read'));
+  if (process.platform === 'win32') {
+    settings.webContents.mainFrame.url = href.replace(/^file:\/\/\/([A-Z]):/, (_match, drive) => `file:///${drive.toLowerCase()}:`);
+    assert.ok(h.invoke('settings:read'));
+  }
+  for (const url of [href.replace('settings.html', 'popup.html'), href.replace(/^file:/, 'http:'),
+    'file:///tmp/settings.html', 'not a url', undefined]) {
+    settings.webContents.mainFrame.url = url;
+    assert.throws(() => h.invoke('settings:read'), /Invalid sender/);
+  }
+});
+
+test('launchAtLogin writes the system login item only when it changes and reports actual state', async () => {
+  const h = await harness(); h.open();
+  assert.equal(h.calls.loginItems, undefined);
+  const on = h.invoke('settings:save', { ...h.persisted, launchAtLogin: true });
+  assert.equal(on.ok, true);
+  assert.equal(JSON.stringify(h.calls.loginItems), JSON.stringify([{ openAtLogin: true, name: 'Copick' }]));
+  assert.equal(on.state.launchAtLogin, true);
+  assert.equal(on.state.loginItemActual, true);
+  h.invoke('settings:save', { ...h.persisted, paused: true });
+  assert.equal(h.calls.loginItems.length, 1);
+  // Entry vanished (moved portable folder): state exposes the mismatch; restart re-asserts it.
+  h.setLoginItem({ openAtLogin: false });
+  assert.equal(h.invoke('settings:read').loginItemActual, false);
+  const off = h.invoke('settings:save', { ...h.persisted, launchAtLogin: false });
+  assert.equal(JSON.stringify(h.calls.loginItems.at(-1)), JSON.stringify({ openAtLogin: false, name: 'Copick' }));
+  assert.equal(off.state.loginItemActual, false);
+});
+test('saving retries a missing login item without rewriting disabled or pending entries', async () => {
+  const missing = await harness({ launchAtLogin: true }); missing.open();
+  missing.setLoginItem({ openAtLogin: false });
+  assert.equal(missing.invoke('settings:read').loginItemActual, false);
+  assert.equal(missing.invoke('settings:save', missing.persisted).ok, true);
+  assert.deepEqual(plain(missing.loginCalls), [{ openAtLogin: true, name: 'Copick' }]);
+  assert.equal(missing.invoke('settings:read').loginItemActual, true);
+
+  for (const options of [
+    { platform: 'win32', login: { openAtLogin: true, entryEnabled: false } },
+    { platform: 'darwin', login: { status: 'requires-approval' } }
+  ]) {
+    const h = await harness({ ...options, launchAtLogin: true }); h.open();
+    assert.equal(h.invoke('settings:save', h.persisted).ok, true);
+    assert.equal(h.loginCalls.length, 0);
+    assert.equal(h.invoke('settings:read').loginItemActive, false);
+  }
+});
+
+test('userData and logs use the Copick directory before loading config', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    const h = await harness({ platform }); h.open();
+    const expected = path.join('/fake', 'Copick');
+    assert.equal(h.app.getPath('userData'), expected);
+    assert.equal(h.calls.logsPath, path.join(expected, 'logs'));
+    assert.equal(h.calls.configPath, path.join(expected, 'config.json'));
+    assert.equal(h.invoke('settings:read').configPath, h.calls.configPath);
+  }
+});
+
+test('popup IPC diagnostics reject the wrong page and record copied after the feedback delay', async () => {
+  const h = await harness({ diagnostics: true });
+  const popup = h.windows[0];
+  popup.webContents.emit('did-finish-load');
+  h.hook.emit('text-selection', { text: 'private selection', programName: 'com.apple.TextEdit',
+    mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+  const token = popup.messages.at(-1)[1];
+  const href = popup.webContents.mainFrame.url;
+  popup.webContents.mainFrame.url = href.replace('popup.html', 'settings.html');
+  assert.equal(h.invoke('popup:copy', token), false);
+  assert.deepEqual(h.calls.writes, []);
+  assert.ok(h.calls.diagnostics.some(([event, metadata]) => event === 'ipc-rejected' && metadata.channel === 'popup:copy'));
+  popup.webContents.mainFrame.url = href.replace('popup.html', 'popup%2Ehtml');
+  assert.equal(h.invoke('popup:copy', token), true);
+  assert.equal(popup.hidden, false);
+  assert.equal(h.calls.diagnostics.some(([event, metadata]) => event === 'popup-hidden' && metadata.reason === 'copied'), false);
+  [...h.timeouts.values()].find(timer => timer.delay === 650).fn();
+  assert.equal(popup.hidden, true);
+  assert.ok(h.calls.diagnostics.some(([event, metadata]) => event === 'popup-hidden' && metadata.reason === 'copied'));
+  assert.equal(JSON.stringify(h.calls.diagnostics).includes('private selection'), false);
+});
+
+test('config files written before launchAtLogin existed still load with it off', async () => {
+  const h = await harness();
+  const legacy = h.policy.validateConfig({ paused: false, clipboardFallback: true, blacklist: [] });
+  assert.equal(legacy.launchAtLogin, false);
+  assert.throws(() => h.policy.validateConfig({ paused: false, clipboardFallback: true, launchAtLogin: 'yes', blacklist: [] }));
 });

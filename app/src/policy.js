@@ -47,10 +47,12 @@ function normalizeList(input) {
 function validateConfig(value) {
   if (!value || typeof value !== 'object' || typeof value.paused !== 'boolean' ||
       typeof value.clipboardFallback !== 'boolean') throw new Error('设置格式无效。');
-  // Config files written before login item support must keep loading; reject only a wrong type.
-  if (value.loginItem !== undefined && typeof value.loginItem !== 'boolean') throw new Error('设置格式无效。');
+  // Prefer the unified field; migrate local configs that only have loginItem.
+  // Configs written before either field existed still default to off.
+  const launchAtLogin = value.launchAtLogin !== undefined ? value.launchAtLogin : value.loginItem;
+  if (launchAtLogin !== undefined && typeof launchAtLogin !== 'boolean') throw new Error('设置格式无效。');
   return { paused: value.paused, clipboardFallback: value.clipboardFallback,
-    loginItem: value.loginItem === true, blacklist: normalizeList(value.blacklist) };
+    launchAtLogin: launchAtLogin === true, blacklist: normalizeList(value.blacklist) };
 }
 function blockedPrograms(config) { return [...new Set([...PROTECTED, ...config.blacklist])]; }
 function isBlocked(name, config) {

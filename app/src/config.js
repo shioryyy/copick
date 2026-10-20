@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { validateConfig } = require('./policy');
-const defaults = () => ({ paused: false, clipboardFallback: process.platform === 'win32', loginItem: false, blacklist: [] });
+const defaults = () => ({ paused: false, clipboardFallback: process.platform === 'win32', launchAtLogin: false, blacklist: [] });
 function loadConfig(file) {
   try { return { config: validateConfig(JSON.parse(fs.readFileSync(file, 'utf8'))), error: null }; }
   catch (error) {

@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      electron-builder:
+        patterns: ['electron-builder', 'app-builder-*', '@electron/*']
+    # selection-hook is a native module with a hand-verified contract (see docs/DESIGN.md);
+    # bump it deliberately, not automatically.
+    ignore:
+      - dependency-name: selection-hook
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

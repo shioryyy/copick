@@ -7,7 +7,7 @@ const path = require('node:path');
 const { NO_CLIPBOARD, normalizeList, validateConfig, isBlocked, popupBounds, validPoint } = require('../src/policy');
 const { loadConfig, saveConfig } = require('../src/config');
 const isMac = process.platform === 'darwin';
-const config = { paused: false, clipboardFallback: !isMac, loginItem: false, blacklist: [] };
+const config = { paused: false, clipboardFallback: !isMac, launchAtLogin: false, blacklist: [] };
 
 test('platform defaults and identifiers match selection-hook programName', () => {
   if (isMac) {
@@ -50,12 +50,21 @@ test('blacklist validation rejects paths, wildcards and invalid config', () => {
   }
   assert.throws(() => validateConfig({ ...config, clipboardFallback: 'true' }));
 });
-test('login item is optional for older config files and rejects non-boolean values', () => {
-  const { loginItem, ...legacy } = config;
-  assert.equal(loginItem, false);
+test('launchAtLogin is optional for older config files and rejects non-boolean values', () => {
+  const { launchAtLogin, ...legacy } = config;
+  assert.equal(launchAtLogin, false);
   assert.deepEqual(validateConfig(legacy), config);
-  assert.equal(validateConfig({ ...config, loginItem: true }).loginItem, true);
-  assert.throws(() => validateConfig({ ...config, loginItem: 'true' }));
+  assert.equal(validateConfig({ ...config, launchAtLogin: true }).launchAtLogin, true);
+  assert.throws(() => validateConfig({ ...config, launchAtLogin: 'true' }));
+});
+test('local loginItem configs migrate to launchAtLogin and the unified field takes precedence', () => {
+  const { launchAtLogin, ...legacy } = config;
+  assert.deepEqual(validateConfig({ ...legacy, loginItem: true }), { ...config, launchAtLogin: true });
+  assert.deepEqual(validateConfig({ ...legacy, loginItem: false }), config);
+  assert.throws(() => validateConfig({ ...legacy, loginItem: 'true' }));
+  assert.deepEqual(validateConfig({ ...config, loginItem: true }), config);
+  assert.equal(validateConfig({ ...config, launchAtLogin: true, loginItem: false }).launchAtLogin, true);
+  assert.throws(() => validateConfig({ ...legacy, launchAtLogin: 'true', loginItem: true }));
 });
 test('work area placement handles negative monitors and bottom edges', () => {
   assert.deepEqual(popupBounds({ x: -10, y: 1070 }, { x: -1920, y: 0, width: 1920, height: 1080 }),
@@ -69,10 +78,15 @@ test('settings round trip, defaults, and corrupt-file fail-closed behavior', t =
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'nested', 'config.json');
   assert.deepEqual(loadConfig(file).config, config);
-  const disabled = { paused: true, clipboardFallback: false, loginItem: true,
+  const disabled = { paused: true, clipboardFallback: false, launchAtLogin: true,
     blacklist: [isMac ? 'com.example.app' : 'example.exe'] };
   saveConfig(file, disabled);
   assert.deepEqual(loadConfig(file).config, disabled);
+  const { launchAtLogin, ...localConfig } = disabled;
+  fs.writeFileSync(file, JSON.stringify({ ...localConfig, loginItem: launchAtLogin }));
+  assert.deepEqual(loadConfig(file).config, disabled);
+  saveConfig(file, loadConfig(file).config);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), disabled);
   assert.throws(() => saveConfig(file, { ...config, blacklist: [isMac ? '*' : '*'] }));
   assert.deepEqual(loadConfig(file).config, disabled);
   fs.writeFileSync(file, '{broken');

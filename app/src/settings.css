@@ -107,6 +107,8 @@ textarea[aria-invalid='true'] { border-color: var(--danger); }
 .built-in-rules .help { margin: 10px 0 4px; }
 .programs { margin: 0; color: var(--muted); line-height: 1.8; }
 .privacy-note { margin: 15px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+.compatibility-details { margin: 0 16px 13px; }
+.compatibility-details .help { margin: 7px 0 0; }
 .actions { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 76px; margin-top: 18px; padding: 14px 0; border-top: 1px solid var(--border); background: var(--background); }
 #message { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 #message[data-tone='danger'] { color: var(--danger); }

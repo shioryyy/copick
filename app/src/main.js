@@ -1,7 +1,7 @@
 'use strict';
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, session, shell } = require('electron');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { fileURLToPath } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { loadConfig, saveConfig } = require('./config');
 const { PROTECTED, NO_CLIPBOARD, validateConfig, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
@@ -13,20 +13,24 @@ let permissionGranted = null;
 const permissionMessage = '需要辅助功能权限，选区监听已暂停。请在系统设置中允许 Copick，然后重新检查权限。';
 function diag(event, metadata, interval) { if (diagnostics) diagnostics.log(event, metadata, interval); }
 const page = name => path.join(__dirname, `${name}.html`);
-const pageURL = name => pathToFileURL(page(name)).href;
 const preload = path.join(__dirname, 'preload.js');
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const icon = path.join(__dirname, '..', 'assets', isMac ? 'icon.icns' : 'icon.ico');
 
-function hidePopup() {
+function hidePopup(reason = 'internal') {
   clearTimeout(expiry);
+  if (current) diag('popup-hidden', { reason: typeof reason === 'string' ? reason : 'internal' });
   current = null;
   if (popup && !popup.isDestroyed()) popup.hide();
 }
+function loginItemActual() {
+  try { return app.getLoginItemSettings(loginItemOptions()).openAtLogin === true; } catch { return null; }
+}
 function state() {
   const login = loginItemState();
-  return { ...config, protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
+  return { ...config, loginItemActual: loginItemActual(),
+    protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
     accessibility: permissionGranted, permissionMessage: permissionGranted === false ? permissionMessage : null,
     loginItemActive: login.active, loginItemMessage: login.message,
     running: Boolean(hook?.isRunning()), error: failure, configPath: configFile };
@@ -92,7 +96,7 @@ function loginItemState() {
   if (!app.isPackaged) return { active: false, message: '开发模式运行，不写入系统登录项；打包后生效。' };
   const settings = readLoginItem();
   const active = loginItemActive(settings);
-  if (active || !config?.loginItem) return { active, message: null };
+  if (active || !config?.launchAtLogin) return { active, message: null };
   if (isWindows) {
     return { active: false, message: loginItemEntry(settings)
       ? '启动项已被系统禁用，请在「任务管理器 > 启动应用」中重新启用。'
@@ -102,21 +106,20 @@ function loginItemState() {
     ? '需要在「系统设置 > 通用 > 登录项」中允许 Copick，否则不会开机启动。'
     : '系统未登记该登录项；未签名或未公证的构建可能无法生效。' };
 }
-function writeLoginItem(openAtLogin) { app.setLoginItemSettings({ openAtLogin, ...loginItemOptions() }); }
-function applyLoginItem() {
+function writeLoginItem(openAtLogin) { app.setLoginItemSettings({ openAtLogin, name: 'Copick', ...loginItemOptions() }); }
+function applyLoginItem(changed = false) {
   // An unpackaged run would register the Electron binary instead of Copick.
   if (!app.isPackaged) return;
   try {
     const settings = readLoginItem();
-    if (!config.loginItem) {
-      if (settings.openAtLogin || loginItemActive(settings) || loginItemEntry(settings)) writeLoginItem(false);
-      return;
-    }
-    // Re-assert a moved or renamed portable folder, but leave an OS-side disable for the user to undo.
+    // Re-assert a moved or renamed portable folder, but leave an OS-side disable or pending approval alone.
     const registered = isWindows ? Boolean(loginItemEntry(settings))
       : settings.status === 'requires-approval' || loginItemActive(settings);
-    if (!registered) writeLoginItem(true);
-  } catch (error) { diag('login-item-error', errorMetadata(error)); }
+    const needsUpdate = config.launchAtLogin ? !registered
+      : settings.openAtLogin || loginItemActive(settings) || Boolean(loginItemEntry(settings));
+    if (changed || needsUpdate) writeLoginItem(config.launchAtLogin);
+  } catch (error) { diag('login-item-error', errorMetadata(error), 0); }
+  diag('login-item', { launchAtLogin: config.launchAtLogin, loginItemActual: loginItemActual() }, 0);
 }
 const counts = { mouseDown: 0, mouseUp: 0, selections: 0, shown: 0, dropped: 0 };
 function gateState() {
@@ -148,9 +151,10 @@ function updateConfig(next) {
   const validated = validateConfig(next);
   const saved = saveConfig(configFile, validated);
   hidePopup();
+  const loginChanged = !config || config.launchAtLogin !== saved.launchAtLogin;
   config = saved;
   failure = null;
-  applyLoginItem();
+  applyLoginItem(loginChanged);
   try {
     applyHook();
   } catch (error) {
@@ -207,8 +211,8 @@ function rebuildTray() {
       click: item => safeUpdate({ ...config, paused: item.checked }) },
     { label: `启用快捷键回退（${isMac ? '⌘C' : 'Ctrl+C'}）`, type: 'checkbox', checked: config.clipboardFallback,
       click: item => safeUpdate({ ...config, clipboardFallback: item.checked }) },
-    { label: `开机启动${config.loginItem && !login.active ? '（未生效）' : ''}`, type: 'checkbox', checked: config.loginItem,
-      click: item => safeUpdate({ ...config, loginItem: item.checked }) },
+    { label: `开机自动启动${config.launchAtLogin && !login.active ? '（未生效）' : ''}`, type: 'checkbox', checked: config.launchAtLogin,
+      click: item => safeUpdate({ ...config, launchAtLogin: item.checked }) },
     { type: 'separator' },
     { label: lastProgram ? `禁用最近取词应用：${lastProgram}` : '禁用最近取词应用',
       enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
@@ -225,33 +229,47 @@ function rebuildTray() {
     { label: '退出 Copick', click: () => app.quit() }
   ]));
 }
+function samePage(url, name) {
+  // Compare decoded paths, not URL strings: Chromium and Node may percent-encode spaces,
+  // non-ASCII install paths or drive-letter case differently.
+  try {
+    if (typeof url !== 'string' || !url.startsWith('file:')) return false;
+    const actual = path.resolve(fileURLToPath(url)), expected = path.resolve(page(name));
+    return isWindows ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
+  } catch { return false; }
+}
 function trusted(event, window, name) {
-  return window && !window.isDestroyed() && event.sender === window.webContents &&
-    event.senderFrame === window.webContents.mainFrame && event.senderFrame.url === pageURL(name);
+  return Boolean(window && !window.isDestroyed() && event.sender === window.webContents &&
+    event.senderFrame === window.webContents.mainFrame && samePage(event.senderFrame.url, name));
+}
+function guard(event, window, name, channel) {
+  if (trusted(event, window, name)) { diag('ipc', { channel }); return true; }
+  diag('ipc-rejected', { channel }, 0);
+  return false;
 }
 function installIPC() {
   ipcMain.handle('settings:read', event => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:read')) throw new Error('Invalid sender');
     refreshPermissions();
     return state();
   });
   ipcMain.handle('settings:save', (event, next) => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:save')) throw new Error('Invalid sender');
     try { updateConfig(next); return { ok: true, state: state() }; }
     catch (error) { return { ok: false, error: error.message, state: state() }; }
   });
   ipcMain.handle('settings:open-accessibility', event => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:open-accessibility')) throw new Error('Invalid sender');
     openAccessibilitySettings();
     return true;
   });
   ipcMain.handle('settings:open-login-items', event => {
-    if (!trusted(event, settings, 'settings')) throw new Error('Invalid sender');
+    if (!guard(event, settings, 'settings', 'settings:open-login-items')) throw new Error('Invalid sender');
     openLoginItemsSettings();
     return true;
   });
   ipcMain.handle('popup:copy', (event, token) => {
-    if (!trusted(event, popup, 'popup') || !current || current.copied || token !== current.token ||
+    if (!guard(event, popup, 'popup', 'popup:copy') || !current || current.copied || token !== current.token ||
         config.paused || (isMac && permissionGranted !== true) || !hook.isRunning() || failure ||
         Date.now() > current.expires || isBlocked(current.program, config)) return false;
     // Native method serializes against fallback clipboard transactions; Electron.writeText does not.
@@ -261,7 +279,7 @@ function installIPC() {
       current.copied = true;
       clearTimeout(expiry);
       expiry = setTimeout(() => {
-        if (current?.token === token) hidePopup();
+        if (current?.token === token) hidePopup('copied');
       }, 650);
     }
     return success;
@@ -297,10 +315,13 @@ function showSelection(data) {
   popup.setBounds(popupBounds(point, screen.getDisplayNearestPoint(point).workArea));
   popup.webContents.send('popup:selection', current.token);
   popup.showInactive();
+  // Source apps that are themselves always-on-top share the topmost band; without this the
+  // popup can stay underneath them and clicks land on the source window instead.
+  if (typeof popup.moveTop === 'function') popup.moveTop();
   counts.shown++;
   diag('selection-shown', metadata);
   clearTimeout(expiry);
-  expiry = setTimeout(hidePopup, 7000);
+  expiry = setTimeout(() => hidePopup('timeout'), 7000);
   publish();
 }
 
@@ -311,6 +332,9 @@ if (!isMac && !isWindows) {
   app.quit();
 } else {
   app.setName('Copick');
+  // Default paths were derived from package.json name ('copick-app') before setName ran.
+  app.setPath('userData', path.join(app.getPath('appData'), 'Copick'));
+  app.setAppLogsPath();
   if (isWindows) app.setAppUserModelId('local.copick.app');
   app.on('second-instance', () => { if (tray) showSettings(); });
   app.on('activate', (_event, hasVisibleWindows) => {
@@ -379,10 +403,10 @@ if (!isMac && !isWindows) {
       if (!point) return;
       const bounds = popup.getBounds();
       if (point.x < bounds.x || point.x >= bounds.x + bounds.width ||
-          point.y < bounds.y || point.y >= bounds.y + bounds.height) hidePopup();
+          point.y < bounds.y || point.y >= bounds.y + bounds.height) hidePopup('mouse-down-outside');
     });
-    hook.on('mouse-wheel', hidePopup);
-    hook.on('key-down', hidePopup);
+    hook.on('mouse-wheel', () => hidePopup('mouse-wheel'));
+    hook.on('key-down', () => hidePopup('key-down'));
     permissionGranted = accessibilityState();
     diag('permissions', { accessibility: permissionGranted,
       permissionProbe: isMac ? 'mac-accessibility' : 'windows-no-permission-probe-api' }, 0);

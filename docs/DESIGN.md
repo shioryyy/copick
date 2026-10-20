@@ -2,7 +2,7 @@
 
 ## 主路线
 
-`app/` 是唯一的跨平台 Electron 主路线：主进程统一负责 selection-hook 生命周期、浮窗、托盘、设置、配置和 IPC；平台差异集中在策略标识、权限提示、坐标单位、图标和打包目标。当前目标是 macOS arm64 与 Windows x64，不引入框架、sidecar、安装器或 updater。
+`app/` 是唯一的跨平台 Electron 主路线：主进程统一负责 selection-hook 生命周期、浮窗、托盘、设置、配置和 IPC；平台差异集中在策略标识、权限提示、坐标单位、图标和打包目标。当前目标是 macOS arm64 与 Windows x64，不引入框架、sidecar 或 updater；Windows 提供 electron-builder 内置 NSIS 安装包（按用户安装、可选目录、开始菜单快捷方式、卸载保留用户数据），便携 ZIP 继续提供。
 
 ## selection-hook 2.1.1 契约
 
@@ -19,13 +19,15 @@
 
 ## 开机启动
 
-`loginItem` 是配置字段，默认关闭，经 `validateConfig` 校验；旧配置文件缺该字段时按 false 处理，不触发失败闭锁。启动时和每次保存后各同步一次：Windows 用 `app.setLoginItemSettings` 写 `HKCU\...\Run`，读写共用 `{ path: process.execPath, args: [] }`，因为该平台按字符串比较命令行；便携包移动或改名后启动时会用当前路径重新登记，已被任务管理器禁用的项不覆盖用户选择。macOS 13+ 以登录项状态判断（`status === 'enabled'`），`requires-approval` 时只提示并保留待批状态，不重复登记。Windows 的状态读取使用 `executableWillLaunchAtLogin` 与 `launchItems[].enabled`，因为 Run 值在系统禁用后依然存在，只看 `openAtLogin` 会误报。`app.isPackaged` 为 false 时不写入系统登录项，避免注册 Electron 二进制。
+`launchAtLogin` 是配置字段，默认关闭，经 `validateConfig` 校验；缺该字段时兼容读取开发版的 `loginItem`，两者同时存在时以 `launchAtLogin` 为准，保存只输出统一字段。旧配置文件两者均缺失时按 false 处理，不触发失败闭锁。启动时和每次保存后各同步一次：Windows 用 `app.setLoginItemSettings` 写 `HKCU\...\Run`，读写共用 `{ path: process.execPath, args: [] }`，因为该平台按字符串比较命令行；便携包移动或改名后启动时会用当前路径重新登记，已被任务管理器禁用的项不覆盖用户选择。macOS 13+ 以登录项状态判断（`status === 'enabled'`），`requires-approval` 时只提示并保留待批状态，不重复登记。Windows 的状态读取使用 `executableWillLaunchAtLogin` 与 `launchItems[].enabled`，因为 Run 值在系统禁用后依然存在，只看 `openAtLogin` 会误报。`app.isPackaged` 为 false 时不写入系统登录项，避免注册 Electron 二进制。
 
 ## 浮窗与安全
 
-主进程保留选中文字，渲染器只收到短期 token。macOS 浮窗设置 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`，使用不可聚焦窗口与 `showInactive()` 避免激活或主动切换 Space；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。
+主进程保留选中文字，渲染器只收到短期 token。复制成功后清除文字、拒绝同一 token 重复复制，并显示约 650 毫秒的确认再隐藏；计时器校验 token，避免关闭后续新选区的浮窗。macOS 浮窗设置 `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`，使用不可聚焦窗口与 `showInactive()` 避免激活或主动切换 Space；点击别处、滚轮、按键、策略更新或 7 秒超时清理。窗口位置先处理无效坐标，再按 work area 限制；慢返回且鼠标已离开时丢弃。显示后调用 `moveTop()`，否则源应用自身置顶时浮窗会留在它下面，点击落到源窗口（Windows 真机复现并修复）。
 
 复制前无法通过现有库可靠核验当前前台应用：`index.d.ts` 没有只读身份接口，`MouseEventData` 仅含坐标/按钮；macOS `GetCurrentSelection` 进入 `SelectionEngine::GetSelectedText`，AX 失败会尝试 ⌘C 回退。为保留仅回退取词的复制能力，未采用关闭回退后再次取词的保守拒绝方案。非键鼠触发的前台切换仍可能留下旧 token，需要原生只读前台身份接口才可完整修复。
+
+状态里的 `loginItemActual` 保留系统 `openAtLogin` 登记状态，`loginItemActive` 反映系统实际生效状态；`loginItemMessage` 提供未生效原因。设置页将待保存的意图与系统状态分开展示。
 
 配置保存先校验并原子持久化，再停止/重配监听；非法输入及持久化失败保留已有配置和监听。启动失败保留已保存用户意图、停止运行并单独报告错误，避免磁盘与内存的暂停/回退设置不一致。
 
@@ -33,4 +35,6 @@
 
 ## 验证边界
 
-`npm run check` 和 `npm test` 验证静态语法、平台策略、标识格式、配置失败闭锁和纯坐标函数。`--smoke-test` 只加载 native module，不启动 hook、不发送按键。实际 macOS Accessibility/AX 应用兼容性、Windows 混合 DPI/管理员窗口/焦点保持必须在对应桌面交互测试；本机静态或加载测试不能替代它们。
+`npm run check` 和 `npm test` 验证静态语法、平台策略、标识格式、配置失败闭锁和纯坐标函数。`--smoke-test` 只加载 native module，不启动 hook、不发送按键。实际 macOS Accessibility/AX 应用兼容性、Windows 混合 DPI/管理员窗口/焦点保持必须在对应桌面交互测试；本机静态或加载测试不能替代它们。真机结果记录在 `docs/COMPATIBILITY.md`，发版前按其中的用例逐项更新。
+
+诊断日志记录 IPC 通过（`ipc`，含通道名）与拒绝（`ipc-rejected`）以及浮窗关闭原因（`popup-hidden`：copied、timeout、mouse-down-outside、mouse-wheel、key-down），不含文本。IPC 发送方校验比较的是 `fileURLToPath` 解码后的页面路径（Windows 下忽略大小写），而不是 URL 字符串，避免 Chromium 与 Node 对含空格、非 ASCII 字符或盘符大小写的安装路径编码不一致时所有 IPC 静默失败。

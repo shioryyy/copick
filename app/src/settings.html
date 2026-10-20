@@ -57,6 +57,10 @@
             <span class="setting-copy"><span class="setting-title">取词失败时尝试快捷键复制</span><span id="fallback-help" class="help">模拟复制会临时改动剪贴板，也可能被剪贴板历史记录。</span></span>
             <input id="fallback" class="switch" type="checkbox" role="switch" aria-describedby="fallback-help">
           </label>
+          <details class="compatibility-details">
+            <summary>哪些应用需要兼容性设置？</summary>
+            <p class="help">关闭回退后，Excel、PDF 阅读器、微信、资源管理器等不支持无障碍取词的应用可能不再弹窗。终端和 VS Code 等编辑器始终不使用回退；VS Code 需把 editor.accessibilitySupport 设为 on 才能取词。</p>
+          </details>
         </div>
       </section>
 

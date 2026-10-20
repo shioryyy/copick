@@ -1,6 +1,6 @@
 {
   "name": "copick-app",
-  "version": "0.3.0-beta.1",
+  "version": "0.3.0-beta.2",
   "private": true,
   "description": "Local-only cross-platform selection copy utility",
   "author": "Copick contributors",
@@ -15,7 +15,7 @@
     "test": "node --test test/*.test.js",
     "pack:mac": "electron-builder --mac zip --arm64",
     "pack:win": "electron-builder --win --x64 --dir",
-    "dist:win": "electron-builder --win zip --x64"
+    "dist:win": "electron-builder --win --x64"
   },
   "dependencies": {
     "selection-hook": "2.1.1"
@@ -45,15 +45,31 @@
       "target": [
         "zip"
       ],
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "hardenedRuntime": true
     },
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        "zip"
-      ],
-      "signExecutable": false
+        "zip",
+        "nsis"
+      ]
     },
-    "artifactName": "Copick-${version}-${os}-${arch}.${ext}"
+    "artifactName": "Copick-${version}-${os}-${arch}.${ext}",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Copick-Setup-${version}-${os}-${arch}.${ext}",
+      "shortcutName": "Copick",
+      "uninstallDisplayName": "Copick",
+      "language": "2052"
+    }
   }
 }
