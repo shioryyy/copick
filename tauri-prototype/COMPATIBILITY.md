@@ -49,12 +49,14 @@ macOS 用 `npm run verify:mac-textedit` / `npm run verify:mac-safari`（等价�
 | 应用 | bundle identifier | 取词 | 回退 | 备注 |
 |---|---|---|---|---|
 | TextEdit | com.apple.TextEdit | ✅ 2026-10-27 method=11 | 禁用 | 拖选一段文字，取到 `CopickPrototype`，浮窗与复制均正确，剪贴板已还原 |
-| Safari | com.apple.Safari | ❌ 2026-10-27 | 禁用 | 拖选成功（网页自身报告选区正确），但 Safari 27 只提供 `AXSelectedTextMarkerRange`，`AXSelectedText` 为空，产品取词拿不到文字。Electron 版使用同一个 `selection-hook` 引擎，同样受影响；这不是 Tauri 回归，是上游引擎在新版 Safari 上的缺口 |
+| Safari | com.apple.Safari | ✅ 2026-10-27 method=11 | 禁用 | 依赖 `bridge.mm` 里的 WebKit 文本标记回退。Safari 27 只提供 `AXSelectedTextMarkerRange`，`AXSelectedText` 为空，上游引擎因此取不到词；回退补上后取词、浮窗、复制均正确 |
 | Chrome | com.google.Chrome | — | 禁用 | 本机未安装 |
 | Terminal | com.apple.Terminal | 应不触发 | 禁用 | 内置黑名单常量，未做交互验证 |
 | Finder | com.apple.finder | 应不触发 | 禁用 | 内置黑名单常量，未做交互验证 |
 
-Safari 那一行是矩阵暴露出的**产品缺口**，不是测试环境问题：驱动在同一轮里同时记录了三条独立证据——网页 `onmouseup` 写入标题的选区、`AXSelectedText`（空）、`AXStringForTextMarkerRange`（正确）。修法是在引擎里补文本标记回退，或在 `bridge.mm` 里做同样的事；两者都尚未实现。
+Safari 那一行最初是 ❌，矩阵暴露出的**产品缺口**而不是测试环境问题：驱动在同一轮里同时记录了三条独立证据——网页 `onmouseup` 写入标题的选区、`AXSelectedText`（空）、`AXStringForTextMarkerRange`（正确）。现在 `bridge.mm` 在引擎之后补了一次文本标记查询（`ReadWebKitSelection`），Safari 恢复可用。
+
+这条回退目前只在 `bridge.mm` 里，上游 `selection-hook` 的 `GetSelectedTextFromElement` 仍然只有 `AXSelectedText` 与「`AXValue` + `AXSelectedTextRange`」两条路径，因此 **Electron 版依然取不到 Safari 的选区**。要么给上游提 PR，要么承认两个版本的 Safari 行为已经不一致。
 
 macOS 的剪贴板回退按设计始终关闭（引擎不提供事务内取消），因此「回退」列固定为「禁用」。
 

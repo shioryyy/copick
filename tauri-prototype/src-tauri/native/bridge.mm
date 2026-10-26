@@ -277,6 +277,63 @@ extern "C" void cp_set_excluded(const char *const *names, size_t count) {
     excludedApps.clear();
     for (size_t index = 0; index < count; ++index) excludedApps.emplace_back(names[index]);
 }
+
+// WebKit（Safari 27 起）不再提供 AXSelectedText，选区只通过文本标记范围暴露。
+// 上游引擎的 GetSelectedTextFromElement 只尝试 AXSelectedText 与「AXValue + AXSelectedTextRange」，
+// 两条路在 Safari 里都拿不到文字，于是这里补一次等价查询。
+// 属性不存在时开销只有一次 AX 调用，不会影响其它应用。
+static bool ReadTextMarkerRange(AXUIElementRef element, std::string &text) {
+    if (!element) return false;
+    CFTypeRef markers = nullptr;
+    if (AXUIElementCopyAttributeValue(element, CFSTR("AXSelectedTextMarkerRange"), &markers) != kAXErrorSuccess || !markers) return false;
+    bool ok = false;
+    CFTypeRef value = nullptr;
+    if (AXUIElementCopyParameterizedAttributeValue(element, CFSTR("AXStringForTextMarkerRange"), markers, &value) == kAXErrorSuccess && value) {
+        if (CFGetTypeID(value) == CFStringGetTypeID()) {
+            CFStringRef string = (CFStringRef)value;
+            CFIndex length = CFStringGetLength(string);
+            if (length > 0 && length <= 1024 * 1024) {
+                CFIndex size = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
+                std::string buffer(static_cast<size_t>(size), '\0');
+                if (CFStringGetCString(string, buffer.data(), size, kCFStringEncodingUTF8)) {
+                    size_t end = buffer.find('\0');
+                    // 与其它来源同样的要求：非空、不含 NUL、不超过 1 MiB。
+                    if (end != std::string::npos && end > 0 && end <= 1024 * 1024) {
+                        text.assign(buffer, 0, end);
+                        ok = true;
+                    }
+                }
+            }
+        }
+        CFRelease(value);
+    }
+    CFRelease(markers);
+    return ok;
+}
+
+// 先问焦点元素（Safari 里它就是 AXWebArea），再退回焦点窗口。
+// 不做整棵树遍历：取词发生在每次拖选之后，遍历卡住一棵庞大或卡死的无障碍树会直接拖慢交互。
+static bool ReadWebKitSelection(int pid, std::string &text) {
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    if (!app) return false;
+    AXUIElementSetMessagingTimeout(app, 0.3);
+    CFTypeRef focused = nullptr;
+    AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, &focused);
+    CFRelease(app);
+    bool ok = false;
+    if (focused && CFGetTypeID(focused) == AXUIElementGetTypeID()) {
+        AXUIElementSetMessagingTimeout((AXUIElementRef)focused, 0.3);
+        ok = ReadTextMarkerRange((AXUIElementRef)focused, text);
+    }
+    if (focused) CFRelease(focused);
+    if (ok) return true;
+    AXUIElementRef window = FocusedWindow(pid);
+    if (!window) return false;
+    ok = ReadTextMarkerRange(window, text);
+    CFRelease(window);
+    return ok;
+}
+
 extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback callback) {
     if (!input || !callback || sourcePid <= 0 || input->sourcePid != sourcePid || input->sourceWindow != sourceWindow || sourcePid == getpid() ||
         !cp_source_matches(sourcePid, sourceWindow) || !cp_permission(false) || !std::isfinite(input->x) || !std::isfinite(input->y)) return false;
@@ -314,6 +371,16 @@ extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback ca
             try {
                 if (valid && !request->gate.CancelledBeforeCommit()) result = engine.GetSelectedText(front, info, config, &endingSequence);
             } catch (...) { result = false; }
+            // WebKit 的选区不走上面任何一条路径。标记范围有值时以它为准：引擎在 Safari 里
+            // 还可能返回窗口的文档 URL（没取到选中文字时的伪结果），所以这里是覆盖而不是补充。
+            std::string marked;
+            if (valid && !request->gate.CancelledBeforeCommit() && ReadWebKitSelection(capture.sourcePid, marked)) {
+                info.text = std::move(marked);
+                info.method = SelectionMethod::AXAPI;
+                // 标记范围不提供选区坐标；锚点继续用鼠标位置。
+                info.posLevel = SelectionPositionLevel::None;
+                result = true;
+            }
             dispatch_sync(dispatch_get_main_queue(), ^{
                 valid = !request->gate.CancelledBeforeCommit() && cp_source_matches(capture.sourcePid, capture.sourceWindow) && cp_permission(false);
             });

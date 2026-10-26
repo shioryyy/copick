@@ -18,13 +18,27 @@
 | 应用 | 取词 | 证据 |
 |---|---|---|
 | TextEdit 1.21 | ✅ method=11 | 拖选得到 `CopickPrototype`，浮窗 `88x40` 出现，`cp_copy_begin` 写入的剪贴板内容正确，`clipboardRestoration.outcome=restoredVerified` |
-| Safari 27.0.1 | ❌ | 拖选确实发生（网页 `onmouseup` 把选区写进标题：`SEL:CopickPrototype`），但 `AXSelectedText` 为空，只有 `AXStringForTextMarkerRange` 能读到 `CopickPrototype`；产品取词返回空 |
+| Safari 27.0.1 | ✅ method=11 | 修复前为空；补上 WebKit 文本标记回退后，取词、浮窗、复制全部与预期一致 |
 
-Safari 的结论经过三条互相独立的证据交叉确认，不是自动化环境的假象：同一轮里网页自己报告了正确选区，说明鼠标事件送达并产生了选区；`AXSelectedText` 与文本标记范围同时读取，只有一个有值。
+### Safari：从 ❌ 到 ✅
 
-这是**上游引擎的缺口**：`selection-hook` 的 `SelectionEngine::GetSelectedTextFromElement` 只尝试 `kAXSelectedText` 和「`kAXValue` + `kAXSelectedTextRange`」两条路径（`core/engine.mm:472`），没有 `AXSelectedTextMarkerRange`。Electron 版用的是同一个引擎，因此同样取不到 Safari 的选区——这不是 Tauri 重构引入的回归，但也意味着换到 Tauri 并不能修好它。
+第一次跑出的结果是“拖选成功、取词为空”。这不是自动化环境的假象：同一轮里有三条互相独立的证据——网页 `onmouseup` 把选区写进标题得到 `SEL:CopickPrototype`（鼠标事件送达且真的选中了）、`AXSelectedText` 为空、`AXStringForTextMarkerRange` 返回正确文字。
 
-驱动把这条限制固化成了断言：Safari 场景预期「取词为空且文本标记范围正确」，现象一变（无论变好还是变坏）都会失败并提示更新矩阵。`npm run verify:mac-textedit` / `npm run verify:mac-safari`。
+根因在上游：`selection-hook` 的 `SelectionEngine::GetSelectedTextFromElement` 只尝试 `kAXSelectedText` 和「`kAXValue` + `kAXSelectedTextRange`」两条路径（`core/engine.mm:472`），Safari 27 两条都不给。
+
+修法是在 `bridge.mm` 的 `cp_capture_begin` 里、引擎返回之后补一次 `ReadWebKitSelection`：
+
+- 先查 `AXFocusedUIElement`（Safari 里它就是 `AXWebArea`），再退回焦点窗口；**不遍历整棵树**——取词发生在每次拖选之后，在一棵庞大或卡死的无障碍树上遍历会直接拖慢交互。
+- 查询设置 0.3 秒 messaging timeout，与文件里其它 AX 调用一致。
+- 结果沿用其它来源的限制：非空、不含 NUL、不超过 1 MiB。
+- `method` 仍报 `AXAPI=11`（它确实是 AX 查询），`posLevel` 设为 `None`，浮窗锚点继续用鼠标位置。
+- **覆盖而不是补充**：引擎在 Safari 里会返回窗口的文档 URL（没取到选中文字时的伪结果），标记范围有值时必须以标记为准。
+
+回归证据：把 `bridge.mm` 临时还原成修复前的版本，驱动报 `拖选成功、WebKit 文本标记范围也正确，但产品取词为空：WebKit 回退没有生效` 并退出 1；恢复修复后同一用例退出 0。之后连跑三次 TextEdit 与一次 Safari 均通过。
+
+**上游仍然是旧的。** `selection-hook` 没有动，Electron 版用的还是同一个引擎，因此 Electron 版依然取不到 Safari 的选区。要让两个版本行为一致，需要给上游提 PR；在那之前，Safari 是 Tauri 版**领先** Electron 版的一处能力，不是持平。
+
+`npm run verify:mac-textedit` / `npm run verify:mac-safari`。
 
 ## 兼容复制回退默认策略（2026-10-26）
 
@@ -518,8 +532,8 @@ EXE：`src-tauri/target/release/copick-tauri-prototype.exe`，**3,284,992 bytes�
 ## 尚未验证／实现
 
 - Windows ARM64、NSIS 安装器、无 WebView2 的安装引导、MSAA 独立路径与管理员窗口；已验证的是 x64 UIA 与剪贴板回退两条路径。
-- 第三方真实应用的完整矩阵：浏览器、PDF、Excel、微信和 IDE 等。macOS 侧 2026-10-27 已补 TextEdit（✅）与 Safari（❌，上游引擎缺文本标记路径），Chrome 未安装、Office 与 IM 未测。
-- Safari 的取词缺口需要在上游 `selection-hook` 补 `AXSelectedTextMarkerRange`，或在 `bridge.mm` 里做等价回退；两者都未实现，因此 macOS 上「浏览器取词」目前不可用。
+- 第三方真实应用的完整矩阵：浏览器、PDF、Excel、微信和 IDE 等。macOS 侧 2026-10-27 已补 TextEdit 与 Safari（均 ✅），Chrome 未安装、Office 与 IM 未测。
+- Safari 的 WebKit 文本标记回退目前只在 `bridge.mm` 里；上游 `selection-hook` 仍缺这条路径，Electron 版因此依旧取不到 Safari 的选区。是否给上游提 PR 待定。
 - 多显示器、混合缩放、负坐标显示器、全屏 Space、系统安全输入。
 - 首次授权、运行中撤销与恢复权限、长期驻留／睡眠唤醒。
 - 完整格式／空剪贴板／外部并发写入下的回退恢复。原型沿用上游事务的已知限制。
