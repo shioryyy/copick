@@ -11,7 +11,9 @@
     "verify:mac": "node scripts/verify-macos.cjs",
     "verify:mac-copy-gate": "node scripts/verify-macos-copy-gate.cjs",
     "verify:mac-guardian": "node scripts/verify-macos-guardian.cjs",
-    "verify:mac-first-frame": "node scripts/verify-macos-first-frame.cjs"
+    "verify:mac-first-frame": "node scripts/verify-macos-first-frame.cjs",
+    "verify:mac-textedit": "node scripts/verify-macos-apps.cjs textedit",
+    "verify:mac-safari": "node scripts/verify-macos-apps.cjs safari"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4"
