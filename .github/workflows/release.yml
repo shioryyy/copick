@@ -17,8 +17,8 @@ jobs:
   build:
     uses: ./.github/workflows/ci.yml
 
-  # Tauri 版本与 Electron 版本一起构建、一起签名。打 tag 时它的失败会阻止发布，
-  # 但默认不把 Tauri 包挂到 Release 上——需要仓库变量 COPICK_PUBLISH_TAURI=true。
+  # Tauri 版本与 Electron 版本一起构建。默认不把 Tauri 包挂到 Release 上——
+  # 需要仓库变量 COPICK_PUBLISH_TAURI=true；此时它的产物属于发布内容，失败必须拦住发布。
   tauri:
     uses: ./.github/workflows/tauri.yml
     secrets: inherit
@@ -26,6 +26,13 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [build, tauri]
+    # 默认发布的是 Electron 版，Tauri 只是旁路构建：它失败时仍然发布 Electron 版，
+    # 否则一个尚未真机验证的重构版能单独卡死正式发布。
+    # 反过来，一旦开启 COPICK_PUBLISH_TAURI，Tauri 产物就是发布内容的一部分，必须成功。
+    if: >-
+      always()
+      && needs.build.result == 'success'
+      && (needs.tauri.result == 'success' || vars.COPICK_PUBLISH_TAURI != 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -104,8 +111,15 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           PUBLISH_TAURI: ${{ vars.COPICK_PUBLISH_TAURI }}
+          TAURI_RESULT: ${{ needs.tauri.result }}
         run: |
           set -euo pipefail
+          # 走到了这里说明 Tauri 失败没有拦住发布（未开启 COPICK_PUBLISH_TAURI），
+          # 但要让维护者一眼看到重构版这次没通过，而不是无声无息。
+          if [[ "$TAURI_RESULT" != "success" ]]; then
+            echo "::warning::Tauri 构建结果为 $TAURI_RESULT，本次只发布 Electron 版"
+            echo "Tauri 构建结果为 \`$TAURI_RESULT\`，本次 Release 只包含 Electron 产物。" >> "$GITHUB_STEP_SUMMARY"
+          fi
           cd dist
           rm -f *.yml *.yaml *.blockmap
           ls -la
@@ -119,7 +133,7 @@ jobs:
             done
           else
             rm -f Copick-Tauri-*
-            echo 'Tauri packages were built and signed but not attached; set repository variable COPICK_PUBLISH_TAURI=true to include them.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Tauri packages are not attached to the Release; set repository variable COPICK_PUBLISH_TAURI=true to include them.' >> "$GITHUB_STEP_SUMMARY"
           fi
           sha256sum *.zip *.exe > SHA256SUMS.txt
           cat SHA256SUMS.txt

@@ -185,6 +185,14 @@ bb50a522…  Copick-Tauri-0.1.0-win-x64.zip
 
 **签名仍未真实验证。** 仓库里没有 `MAC_CSC_LINK` / `WIN_CSC_LINK` 等 secrets，两步都走了「缺密钥」分支并如实写进 job summary（`Windows: no WIN_CSC_LINK secret; artifacts are unsigned.`）。也就是说：签名步骤的代码路径在真实 runner 上跑过了，但只跑了空密钥分支；真正的证书导入、`signtool` 签名与公证从未执行过。要验证必须先在仓库配置对应 secrets 再重跑。
 
+### 2026-10-27 调整：Tauri 失败不再阻塞 Electron 发布
+
+上面写的「任一失败都阻止发布」在合并后改成有条件阻塞。理由是这个判断当时把 Tauri 当成了与 Electron 同等可信的发布内容，而实际上它连 macOS 应用级取词矩阵都没跑过：一个未验证的重构版不该有能力卡死正式发布。
+
+`publish.if` 现在是 `always() && needs.build.result == 'success' && (needs.tauri.result == 'success' || vars.COPICK_PUBLISH_TAURI != 'true')`。`needs` 仍然包含 `tauri`——解耦的是失败是否阻塞，不是是否等待产物上传。开启 `COPICK_PUBLISH_TAURI` 后条件退化为「Tauri 必须成功」，因为那时它的产物就是发布内容。Tauri 失败但发布继续时，`Verify artifacts` 步骤会写一条 `::warning::` 并留一行 job summary。
+
+这条规则由 `test/release-decoupling.test.cjs` 用真值表锁住：把 `if` 字符串求值成布尔，直接验证五种 build/tauri/attach 组合。反向验证过——把条件改回「Tauri 必须成功」，该测试立刻失败。
+
 ## 真机兼容矩阵（2026-10-26）
 
 新增 `COMPATIBILITY.md` 记录 Tauri 版自己的矩阵，不继承 Electron 的结论；配套脚本 `scripts/verify-windows-apps.ps1` + `.cs` 对**真实应用**做拖选、找浮窗、点击、读剪贴板、等浮窗隐藏。记事本与 Edge 各跑两轮（先关闭回退测无障碍，再开回退测可用性），终端只跑一轮并要求日志里没有选区请求。
