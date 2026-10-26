@@ -145,6 +145,24 @@ Tauri 附件默认只留在 Actions 产物里。仓库变量 `COPICK_PUBLISH_TAU
 
 `workflow_dispatch` 只列出默认分支上已存在的工作流，而 `main` 还没有 `.github/workflows/tauri.yml`；本机也没有 GitHub token（未安装 `gh`、无 `GH_TOKEN`），无法开出 PR 来触发 `pull_request`。因此本轮**没有**在真实 GitHub Actions 上跑过任何一次，签名路径也只有静态审查、没有任何一次真实签名或公证。合并到 `main` 或打开 PR 之后应立即补跑，并核对 job summary 里的签名状态与产物哈希。
 
+## 真机兼容矩阵（2026-10-26）
+
+新增 `COMPATIBILITY.md` 记录 Tauri 版自己的矩阵，不继承 Electron 的结论；配套脚本 `scripts/verify-windows-apps.ps1` + `.cs` 对**真实应用**做拖选、找浮窗、点击、读剪贴板、等浮窗隐藏。记事本与 Edge 各跑两轮（先关闭回退测无障碍，再开回退测可用性），终端只跑一轮并要求日志里没有选区请求。
+
+| 目标 | 取词（回退关闭） | 回退（默认） | 结论 |
+|---|---|---|---|
+| Edge 本地 HTML | ✅ `method=1` | ✅ `method=1` | 正值对照，证明夹具能观察到 UIA 成功；浮窗 `780,229 88x40`，复制内容一致 |
+| Windows 11 记事本 | ❌ `COPICK_CAPTURE_EMPTY` ×5 | ✅ `method=99` | WinUI 记事本取不到文本，回退可用；与 Electron 2026-10-18 的「记事本 UIA ✅」不一致，疑为经典记事本与 WinUI 版的差别 |
+| cmd 控制台 | 应不触发 ✅ | 应不触发 ✅ | 日志无 `COPICK_SELECTION_RECEIVED`，终端全局过滤生效 |
+
+夹具踩到并修掉的三个坑：
+
+1. `SetCursorPos` 的移动不进产品的低级鼠标钩子，拖动被判定成单击（`gesture=0`、没有取词）。改用 `SendInput` 的绝对移动后才出现 `gesture=1`。
+2. 控制台程序的默认单元状态不是 STA，`Clipboard.GetText()` 抛异常被吞掉，表现为「复制成功但读到 null」。驱动加 `[STAThread]`。
+3. 复制成功后浮窗要 650 ms 才过期隐藏，驱动原来只等 400 ms 就判失败。现在轮询到隐藏为止（上限 3 秒）。
+
+macOS 侧本轮没有任何应用级结果：验证时桌面锁屏，见上一节。矩阵里其余应用、混合缩放、全屏 Space、剪贴板管理器均为未测，`COMPATIBILITY.md` 已按「— 」标注，不能当作已验收。
+
 ## v0.1.0 产品化验收（2026-10-26）
 
 本轮针对完整产品行为（单实例、托盘、设置页、配置持久化、关闭常驻、开机启动、退出）在最终源码上重新 build 和 package。Windows 环境为 OMEN Windows 11 x64 build 26200、2560×1440、150% 缩放、已登录 console Session 2；所有桌面交互经普通权限 Interactive 计划任务执行，未绕过锁屏或权限。
