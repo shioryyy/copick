@@ -43,7 +43,6 @@ textarea[aria-invalid='true'] { border-color: var(--error); }
 textarea::placeholder { color: var(--muted); opacity: 1; }
 .error { margin-top: 8px; color: var(--error); font-size: 12px; }
 #config-error { margin: 0 0 12px; }
-#migration-note { margin-bottom: 12px; }
 .version span { margin-left: 6px; color: var(--muted); }
 .warning { border: 1px solid var(--error); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
 .warning h2 { color: var(--error); }
