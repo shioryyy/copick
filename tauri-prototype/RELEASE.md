@@ -68,7 +68,15 @@ Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的
 
 ### 与 release.yml 的关系
 
-`tauri.yml` 同时是 `release.yml` 的可复用工作流：打 `v*` tag 时 Electron（`ci.yml`）与 Tauri 并行构建，任一失败都会阻止发布。Tauri 附件默认**不**挂到 GitHub Release，只保留在 Actions 产物里；在仓库设置中新增变量 `COPICK_PUBLISH_TAURI=true` 后，发布步骤会额外上传 `Copick-Tauri-*` 并在 release notes 里加一节「Tauri 重构版（预览）」。关闭时发布步骤会先删掉这些文件再计算 `SHA256SUMS.txt`，避免清单里出现未发布的附件。
+`tauri.yml` 同时是 `release.yml` 的可复用工作流：打 `v*` tag 时 Electron（`ci.yml`）与 Tauri 并行构建。Tauri 附件默认**不**挂到 GitHub Release，只保留在 Actions 产物里；在仓库设置中新增变量 `COPICK_PUBLISH_TAURI=true` 后，发布步骤会额外上传 `Copick-Tauri-*` 并在 release notes 里加一节「Tauri 重构版（预览）」。关闭时发布步骤会先删掉这些文件再计算 `SHA256SUMS.txt`，避免清单里出现未发布的附件。
+
+失败的影响范围取决于这个变量：
+
+- **默认（变量未设）**：Tauri 构建失败**不会**阻止 Electron 版发布，发布步骤会在 `$GITHUB_STEP_SUMMARY` 里留一行警告。这样尚未真机验证的重构版就无法单独卡死正式发布。
+- **`COPICK_PUBLISH_TAURI=true`**：Tauri 产物是发布内容的一部分，构建失败必须拦住发布（否则 release notes 会写着一堆不存在的附件）。
+- Electron 自身构建失败在任何情况下都阻止发布。
+
+这条规则由 `test/release-decoupling.test.cjs` 锁住，改动 `release.yml` 的 `publish.if` 会让它失败。
 
 ## 校验与安装
 
