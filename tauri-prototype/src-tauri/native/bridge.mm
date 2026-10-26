@@ -270,7 +270,8 @@ extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback ca
     CaptureRequest capture = *input;
     SelectionConfigSnapshot config;
     config.runningPid = getpid();
-    // 异步上游回退不支持事务内取消，完成受控实现前保持关闭。
+    // macOS 引擎的 GetSelectedText 不接受 stop token，回退无法在事务内取消；
+    // 在补齐该能力前保持关闭，配置层也会忽略 macOS 上的开启意图。
     config.clipboardEnabled = false;
     config.clipboardSequence = clipboardSequence;
     config.globalFilterMode = FilterMode::ExcludeList;

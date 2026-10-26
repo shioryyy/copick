@@ -293,6 +293,9 @@ class CopickFixture : Form {
         return ClipboardGuardian.CurrentSequence() == sentinelSequence &&
             Clipboard.ContainsText() && Clipboard.GetText() == Sentinel;
     }
+    // 回退场景由产品自己备份并重写剪贴板，序列号必然前进，不能作为“未改动”的判据；
+    // 此时以文本内容判定恢复完成，格式完整性与最终写回由守护进程报告独立核验。
+    bool SentinelTextIntact() { return Clipboard.ContainsText() && Clipboard.GetText() == Sentinel; }
     bool SourceFocused() { return GetForegroundWindow() == Handle; }
     IntPtr ObserveBackgroundDrag(int code, IntPtr message, IntPtr data) {
         if (code == 0 && phase == "popup") {
@@ -406,7 +409,8 @@ class CopickFixture : Form {
                 focusBefore = SourceFocused();
                 RecordClipboard("before_click");
                 report["popupShown"] = true; report["focusBeforeClick"] = focusBefore;
-                report["clipboardRestoredBeforeClick"] = SentinelIntact();
+                report["clipboardRestoredBeforeClick"] = mode == "fallback" ? SentinelTextIntact() : SentinelIntact();
+                if (mode == "fallback") report["clipboardSequenceBumped"] = ClipboardGuardian.CurrentSequence() != sentinelSequence;
                 report["popupX"] = popupBounds.X; report["popupY"] = popupBounds.Y;
                 report["popupWidth"] = popupBounds.Width; report["popupHeight"] = popupBounds.Height;
                 using (Bitmap shot = new Bitmap(popupBounds.Width, popupBounds.Height)) {

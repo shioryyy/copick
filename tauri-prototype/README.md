@@ -35,6 +35,6 @@ npm --prefix tauri-prototype run package
 
 ## 当前支持范围
 
-macOS 通过 Accessibility（AX）读取选区，Windows 使用 UIA／MSAA。兼容复制回退保持禁用，不会为读取选区自动模拟复制快捷键，因此部分应用暂不支持。键盘选区自动触发暂未支持。
+macOS 通过 Accessibility（AX）读取选区，Windows 使用 UIA／MSAA。Windows 在无障碍取词失败后默认使用兼容复制回退（模拟 Ctrl+Insert／Ctrl+C），可在设置中关闭；回退会临时改动剪贴板，取消时恢复备份。macOS 的回退无法在事务内取消，因此始终关闭，仅 UIA／AX 可读的应用可用。键盘选区自动触发暂未支持。
 
 当前版本不承诺与 Electron 版的全部手势、应用兼容性及发行行为一致。历史桌面验证记录和已知边界见 [VALIDATION.md](VALIDATION.md)；历史结果不代替当前安装包验收。

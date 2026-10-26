@@ -14,7 +14,8 @@ function deferred() {
 }
 function settings(overrides = {}) {
   return {
-    config: { version: 1, excludedApps: ['terminal'], diagnosticsEnabled: false },
+    config: { version: 1, excludedApps: ['terminal'], diagnosticsEnabled: false, clipboardFallback: false },
+    fallbackAvailable: true,
     startupEnabled: false, startupAvailable: true, startupError: null, configError: null,
     migratedFromElectron: false, version: '1.2.3', ...overrides
   };
@@ -78,12 +79,13 @@ test('校验 Unicode 字符长度、200 项边界和控制字符', () => {
     assert.throws(() => model.parseExcludedApps(`app${String.fromCharCode(code)}`), /控制字符/);
   }
 });
-test('配置快照独立复制并忽略 paused，诊断值必须是布尔值', () => {
-  const source = { version: 1, excludedApps: ['Terminal'], diagnosticsEnabled: false, paused: true };
+test('配置快照独立复制并忽略 paused，诊断与回退值必须是布尔值', () => {
+  const source = { version: 1, excludedApps: ['Terminal'], diagnosticsEnabled: false, clipboardFallback: true, paused: true };
   const snapshot = model.copyConfig(source);
   source.excludedApps.push('new');
-  assert.deepEqual(snapshot, { version: 1, excludedApps: ['Terminal'], diagnosticsEnabled: false });
+  assert.deepEqual(snapshot, { version: 1, excludedApps: ['Terminal'], diagnosticsEnabled: false, clipboardFallback: true });
   assert.throws(() => model.readSettings(settings({ config: { ...snapshot, diagnosticsEnabled: 'false' } })), /配置格式/);
+  assert.throws(() => model.readSettings(settings({ config: { ...snapshot, clipboardFallback: 'true' } })), /配置格式/);
 });
 test('加载原始配置，轮询只更新监听状态，不覆盖草稿', async () => {
   const h = harness();
@@ -143,13 +145,13 @@ test('保存规范化配置，期间锁定重复提交；以服务端返回值�
   await h.elements['settings-form'].fire('submit');
   const call = h.named('save_settings')[0];
   assert.deepEqual(JSON.parse(JSON.stringify(call.args)), { config: {
-    version: 1, excludedApps: ['safari', 'com.apple.terminal'], diagnosticsEnabled: true
+    version: 1, excludedApps: ['safari', 'com.apple.terminal'], diagnosticsEnabled: true, clipboardFallback: false
   } });
   assert.equal(h.named('save_settings').length, 1);
-  for (const id of ['save', 'revert', 'startup', 'excluded-apps', 'diagnostics', 'quit']) {
+  for (const id of ['save', 'revert', 'startup', 'excluded-apps', 'diagnostics', 'clipboard-fallback', 'quit']) {
     assert.equal(h.elements[id].disabled, true, id);
   }
-  call.resolve(settings({ config: { version: 1, excludedApps: ['normalized'], diagnosticsEnabled: true } }));
+  call.resolve(settings({ config: { version: 1, excludedApps: ['normalized'], diagnosticsEnabled: true, clipboardFallback: true } }));
   await saving;
   assert.equal(h.elements['excluded-apps'].value, 'normalized');
   assert.equal(h.elements.save.disabled, true);
@@ -182,10 +184,11 @@ test('启动设置返回其他配置时也不替换草稿或撤销基线', async
   h.elements.startup.checked = true;
   const changing = h.elements.startup.fire('change');
   h.named('set_startup')[0].resolve(settings({ startupEnabled: true,
-    config: { version: 1, excludedApps: ['unrelated'], diagnosticsEnabled: true } }));
+    config: { version: 1, excludedApps: ['unrelated'], diagnosticsEnabled: true, clipboardFallback: true } }));
   await changing;
   assert.equal(h.elements['excluded-apps'].value, 'new');
   assert.equal(h.elements.diagnostics.checked, true);
+  assert.equal(h.elements['clipboard-fallback'].checked, false, '开机启动响应不得覆盖回退草稿');
   assert.equal(h.elements.startup.checked, true);
   h.elements.revert.fire('click');
   assert.equal(h.elements['excluded-apps'].value, 'terminal');
@@ -206,14 +209,36 @@ test('开机启动异常回滚复选框并显示错误，不支持时禁用', as
   assert.equal(unsupported.elements.startup.disabled, true);
   assert.match(unsupported.elements['startup-error'].textContent, /不支持/);
 });
-test('迟到的轮询不能覆盖暂停结果；configure 强制 fallback=false', async () => {
+test('回退开关仅在支持平台可用，改动进入草稿并可保存', async () => {
+  const unsupported = harness();
+  await loaded(unsupported, settings({ fallbackAvailable: false }));
+  assert.equal(unsupported.elements['clipboard-fallback'].disabled, true);
+  assert.match(unsupported.elements['fallback-hint'].textContent, /始终关闭/);
+
+  const h = harness();
+  await loaded(h, settings({ fallbackAvailable: true }));
+  assert.equal(h.elements['clipboard-fallback'].disabled, false);
+  assert.equal(h.elements.save.disabled, true);
+  h.elements['clipboard-fallback'].checked = true;
+  h.elements['clipboard-fallback'].fire('change');
+  assert.equal(h.elements.save.disabled, false, '回退改动进入草稿');
+  const saving = h.elements['settings-form'].fire('submit');
+  const call = h.named('save_settings')[0];
+  assert.equal(call.args.config.clipboardFallback, true);
+  call.resolve(settings({ config: { version: 1, excludedApps: ['terminal'],
+    diagnosticsEnabled: false, clipboardFallback: true } }));
+  await saving;
+  assert.equal(h.elements['clipboard-fallback'].checked, true);
+  assert.equal(h.elements.save.disabled, true);
+});
+test('迟到的轮询不能覆盖暂停结果；configure 只提交暂停意图', async () => {
   const h = harness();
   await loaded(h);
   const polling = h.poll();
   const pausing = h.elements.pause.fire('click');
   await h.elements.pause.fire('click');
   assert.equal(h.named('configure').length, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(h.named('configure')[0].args)), { paused: true, fallback: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(h.named('configure')[0].args)), { paused: true });
   h.named('configure')[0].resolve(status({ paused: true, running: false }));
   await pausing;
   h.named('status')[1].resolve(status());
@@ -229,14 +254,14 @@ test('未获得权限时仍可暂停和恢复监听', async () => {
   assert.equal(h.elements.pause.disabled, false);
   const pausing = h.elements.pause.fire('click');
   const pauseCall = h.named('configure')[0];
-  assert.deepEqual(JSON.parse(JSON.stringify(pauseCall.args)), { paused: true, fallback: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(pauseCall.args)), { paused: true });
   pauseCall.resolve(status({ permission: false, running: false, paused: true }));
   await pausing;
   assert.equal(h.elements.pause.disabled, false);
   assert.equal(h.elements.pause.textContent, '恢复监听');
   const resuming = h.elements.pause.fire('click');
   const resumeCall = h.named('configure')[1];
-  assert.deepEqual(JSON.parse(JSON.stringify(resumeCall.args)), { paused: false, fallback: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(resumeCall.args)), { paused: false });
   resumeCall.resolve(status({ permission: false, running: false }));
   await resuming;
   assert.equal(h.elements.pause.disabled, false);

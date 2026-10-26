@@ -2,6 +2,44 @@
 
 日期：2026-10-23。环境：本机 macOS Darwin 27.0.0、Apple Silicon arm64，Rust 1.99.1，Tauri 2.12.5，CLI 2.12.4，selection-hook 2.1.1。
 
+## 兼容复制回退默认策略（2026-10-26）
+
+本轮改变回退策略并做了两平台验证。Windows 引擎的 `GetSelectedText` 接受 stop token，回退可在备份后、发送快捷键前和轮询中取消并恢复备份；macOS 引擎没有该参数，回退无法在事务内取消。因此：
+
+| 平台 | 默认 | 设置页 | 配置层 |
+|---|---|---|---|
+| Windows | 开启 | 可关闭，说明会临时改动剪贴板 | `Config::default` 与反序列化缺省均为 true |
+| macOS | 关闭 | 禁用并说明「无法在事务内取消」 | `validate()` 强制改回 false，忽略旧配置或导入的开启意图 |
+
+Electron 版 `clipboardFallback` 会在首次启动迁移时沿用；启动项不随迁移导入。
+
+### 自动检查
+
+本机 macOS 与 OMEN（Windows 11 x64 build 26200）均通过 `npm test`：48 条 Node 测试、20 条 Rust 测试。新增的 Rust 测试锁定 Windows 默认开启、macOS 强制关闭，以及迁移只读取 Electron 侧的回退值。
+
+### Windows 真机（OMEN，交互式桌面会话）
+
+用 `src-tauri/target/release/copick-tauri-prototype.exe`（3,697,152 bytes，本轮构建）跑 `scripts/verify-windows.ps1`：
+
+| 场景 | 次数 | 结果 | 证据 |
+|---|---:|---|---|
+| `fallback`（仅支持复制的自绘控件） | 6 | 全部通过 | `method=99`，`clipboardRestoredBeforeClick=true`，点击后文本正确、焦点与选区保留，守护进程 `restoredVerified` |
+| 无配置文件启动 | 2 | 全部通过 | 缺省值直接落到回退，`method=99` |
+| `fallback-disabled` | 1 | 通过 | 无浮窗，`copyShortcutCount=0`，剪贴板内容与序列号均未变 |
+| `double` / `drag` | 各 1 | 通过 | `method=1`，默认开启回退没有抢占 UIA 路径 |
+
+### 夹具与脚本修正
+
+1. `verify-windows.cs` 的 `SentinelIntact()` 要求剪贴板序列号停在守护进程写入的那一版。开启回退后，产品必然备份并重写剪贴板，序列号一定前进，该断言在回退场景下不可能成立。现改为：回退场景以**文本内容**判定恢复完成（`clipboardRestoredBeforeClick`），并单独记录 `clipboardSequenceBumped`；格式完整性与最终写回仍由守护进程报告独立核验。其余场景继续使用严格判据。
+2. `scripts/verify-windows.ps1` 在 `fallback` / `fallback-disabled` 前显式写入平台配置（`%APPDATA%\local.copick.tauri\config.json`），否则 Windows 默认开启后 `fallback-disabled` 失去对照意义。写入必须是无 BOM 的 UTF-8——`serde_json` 不接受 BOM，带 BOM 时会静默回落到默认值。运行结束后还原原始配置。
+
+### 已知限制
+
+- 回退过程中剪贴板序列号会前进；剪贴板管理器（如 Win+V）可能记录一次中间内容。私有格式、并发复制与恢复期间的进程退出仍不保证完整恢复。
+- 本轮早期出现过连续两次取词在 2 秒截止内未完成（`COPICK_CAPTURE_TIMEOUT`），随后六轮连续通过，未能定位根因；与历史记录中「Windows fallback 曾首次失败、复跑 `method=99` 通过」的偶发一致，暂不改动超时。
+- 只验证了自绘 WinForms 控件这一条回退路径；Excel、PDF 阅读器、微信、资源管理器等真实应用仍待兼容矩阵复测。
+- macOS 回退保持关闭，本轮没有新增 macOS 端回退验证。
+
 ## v0.1.0 产品化验收（2026-10-26）
 
 本轮针对完整产品行为（单实例、托盘、设置页、配置持久化、关闭常驻、开机启动、退出）在最终源码上重新 build 和 package。Windows 环境为 OMEN Windows 11 x64 build 26200、2560×1440、150% 缩放、已登录 console Session 2；所有桌面交互经普通权限 Interactive 计划任务执行，未绕过锁屏或权限。

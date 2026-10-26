@@ -1,23 +1,33 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::{Path, PathBuf}};
 
+/// Windows 引擎的剪贴板回退接受事务内取消令牌，可在发送快捷键前停止并恢复备份，
+/// 因此默认开启以覆盖只有回退才能取词的应用（Excel、PDF 阅读器、微信、资源管理器）。
+/// macOS 引擎没有该令牌，回退无法在事务内取消，保持关闭。
+fn default_clipboard_fallback() -> bool { cfg!(target_os = "windows") }
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
     #[serde(default)]
     pub paused: bool,
+    #[serde(default = "default_clipboard_fallback")]
+    pub clipboard_fallback: bool,
     pub excluded_apps: Vec<String>,
     pub diagnostics_enabled: bool,
 }
 impl Default for Config {
     fn default() -> Self {
-        Self { version: 1, paused: false, excluded_apps: Vec::new(), diagnostics_enabled: false }
+        Self { version: 1, paused: false, clipboard_fallback: default_clipboard_fallback(),
+            excluded_apps: Vec::new(), diagnostics_enabled: false }
     }
 }
 impl Config {
     pub fn validate(mut self) -> Result<Self, String> {
         if self.version != 1 { return Err("此设置版本暂不支持，请更新 Copick。".into()); }
+        // macOS 没有可取消的回退路径，忽略来自旧配置或旧版导入的开启意图。
+        if !cfg!(target_os = "windows") { self.clipboard_fallback = false; }
         if self.excluded_apps.len() > 200 { return Err("最多添加 200 个排除应用。".into()); }
         let mut names = Vec::new();
         for entry in self.excluded_apps {
@@ -99,8 +109,12 @@ fn migrate(path: &Path) -> Result<Config, String> {
             .collect::<Result<_, _>>()?,
         None => Vec::new(),
     };
-    // 启动项属于不同应用身份，兼容复制尚未启用；不导入这些系统副作用。
-    Config { paused, excluded_apps, ..Config::default() }.validate()
+    // 兼容复制沿用 Electron 版的设置值；启动项属于不同应用身份，不导入该副作用。
+    let clipboard_fallback = match value.get("clipboardFallback") {
+        Some(value) => value.as_bool().ok_or("旧设置的兼容复制状态无效。")?,
+        None => default_clipboard_fallback(),
+    };
+    Config { paused, clipboard_fallback, excluded_apps, ..Config::default() }.validate()
 }
 
 pub fn legacy_path() -> Option<PathBuf> {
@@ -126,6 +140,16 @@ mod tests {
         }
     }
     #[test]
+    fn clipboard_fallback_defaults_to_windows_and_is_forced_off_elsewhere() {
+        assert_eq!(Config::default().clipboard_fallback, cfg!(target_os = "windows"));
+        let requested = Config { clipboard_fallback: true, ..Config::default() }.validate().unwrap();
+        assert_eq!(requested.clipboard_fallback, cfg!(target_os = "windows"));
+        // 缺少该字段的旧版 Tauri 配置按平台默认值读取，不因缺字段而闭锁。
+        let parsed: Config = serde_json::from_str(
+            r#"{"version":1,"excludedApps":[],"diagnosticsEnabled":false}"#).unwrap();
+        assert_eq!(parsed.clipboard_fallback, cfg!(target_os = "windows"));
+    }
+    #[test]
     fn imports_once_and_never_changes_electron_file() {
         let root = directory(); let old = root.join("electron.json"); let path = root.join("config.json");
         let bytes = br#"{"paused":true,"clipboardFallback":true,"launchAtLogin":true,"blacklist":["Code.EXE"]}"#;
@@ -133,6 +157,8 @@ mod tests {
         let store = Store::load(path.clone(), Some(&old));
         assert!(store.migrated && store.config.paused);
         assert_eq!(store.config.excluded_apps, ["code.exe"]);
+        // 回退意图沿用旧配置，但 macOS 没有可取消的回退路径，始终关闭。
+        assert_eq!(store.config.clipboard_fallback, cfg!(target_os = "windows"));
         assert_eq!(fs::read(&old).unwrap(), bytes);
         fs::write(&old, b"broken").unwrap();
         assert!(!Store::load(path, Some(&old)).migrated);

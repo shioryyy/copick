@@ -455,8 +455,10 @@ extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback ca
         request->id = input->requestId; request->x = input->x; request->y = input->y;
         request->captureCallback = callback; request->source = source;
         request->endingSequence = source.clipboardSequence;
-        // 上游回退缺少来源绑定和恢复所有权保护，受控事务就绪前保持关闭。
-        request->config.clipboardEnabled = false;
+        // 回退仅在无障碍取词失败后由引擎触发。request->cancel 作为 stop token 传入
+        // GetSelectedText，引擎在备份后、发送快捷键前和轮询中都会检查它，取消时恢复
+        // 备份；与已发布 Electron 版的暴露面一致，并多了事务内取消。
+        request->config.clipboardEnabled = input->fallback != 0;
         request->config.triggeredByUser = false; request->config.clipboardSequence = source.clipboardSequence;
         request->config.mouseDownCursor = source.downCursor;
         request->config.mouseUpCursor = reinterpret_cast<HCURSOR>(input->mouseUpCursor);

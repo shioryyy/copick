@@ -3,7 +3,8 @@
 const model = window.CopickSettings;
 const elements = Object.fromEntries([
   'status', 'permission', 'pause', 'connection-error', 'listener-error',
-  'settings-form', 'startup', 'startup-hint', 'startup-error', 'excluded-apps',
+  'settings-form', 'startup', 'startup-hint', 'startup-error', 'clipboard-fallback', 'fallback-hint',
+  'excluded-apps',
   'exclusions-hint', 'exclusions-error', 'diagnostics', 'config-error', 'migration-note', 'version',
   'save', 'revert', 'reload-settings', 'settings-message', 'settings-action-error',
   'open-logs', 'quit', 'app-message', 'app-error'
@@ -33,10 +34,12 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 function draft() {
-  return model.draftConfig(elements['excluded-apps'].value, elements.diagnostics.checked);
+  return model.draftConfig(elements['excluded-apps'].value, elements.diagnostics.checked,
+    elements['clipboard-fallback'].checked);
 }
 function dirty() {
-  return model.hasChanges(savedConfig, elements['excluded-apps'].value, elements.diagnostics.checked);
+  return model.hasChanges(savedConfig, elements['excluded-apps'].value, elements.diagnostics.checked,
+    elements['clipboard-fallback'].checked);
 }
 function updateSettingsControls() {
   let validationError = '';
@@ -50,6 +53,7 @@ function updateSettingsControls() {
   elements['excluded-apps'].disabled = locked;
   elements.diagnostics.disabled = locked;
   elements.startup.disabled = locked || !settingsInfo.startupAvailable;
+  elements['clipboard-fallback'].disabled = locked || !settingsInfo.fallbackAvailable;
   elements.save.disabled = locked || (!changed && !settingsInfo.configError) || Boolean(validationError);
   elements.revert.disabled = locked || !changed;
   elements['reload-settings'].disabled = settingsPending;
@@ -64,10 +68,15 @@ function updateSettingsControls() {
 function restoreDraft() {
   elements['excluded-apps'].value = savedConfig.excludedApps.join('\n');
   elements.diagnostics.checked = savedConfig.diagnosticsEnabled;
+  elements['clipboard-fallback'].checked = savedConfig.clipboardFallback;
 }
 function renderSettingsInfo(info) {
   settingsInfo = info;
   elements.startup.checked = info.startupEnabled;
+  // 回退属于草稿的一部分，只在加载、保存和撤销时同步，不能被开机启动等即时保存覆盖。
+  elements['fallback-hint'].textContent = info.fallbackAvailable
+    ? '无障碍取词失败时模拟复制快捷键读取选区。会临时改动剪贴板；私有格式、并发复制或剪贴板管理器可能无法完整恢复。'
+    : '当前平台的回退无法在事务内取消，因此始终关闭。';
   elements['startup-hint'].textContent = info.startupAvailable
     ? (typeof info.startupNote === 'string' && info.startupNote
       ? info.startupNote : '开关表示启动项已登记，更改在下次登录时生效。')
@@ -218,7 +227,7 @@ if (navigator.userAgent.includes('Windows')) {
 elements.permission.addEventListener('click', () => listenerAction('permission'));
 elements.pause.addEventListener('click', () => {
   if (latestStatus) {
-    return listenerAction('configure', { paused: !latestStatus.paused, fallback: false });
+    return listenerAction('configure', { paused: !latestStatus.paused });
   }
 });
 elements['settings-form'].addEventListener('submit', saveSettings);
@@ -231,7 +240,8 @@ elements.revert.addEventListener('click', () => {
   message('settings-action-error', '');
   updateSettingsControls();
 });
-for (const [id, event] of [['excluded-apps', 'input'], ['diagnostics', 'change']]) {
+for (const [id, event] of [['excluded-apps', 'input'], ['diagnostics', 'change'],
+  ['clipboard-fallback', 'change']]) {
   elements[id].addEventListener(event, () => {
     settingsNotice = '';
     updateSettingsControls();

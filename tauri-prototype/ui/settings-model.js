@@ -32,19 +32,22 @@
   function copyConfig(config) {
     if (!config || config.version !== 1 || !Array.isArray(config.excludedApps) ||
         !config.excludedApps.every(item => typeof item === 'string') ||
-        typeof config.diagnosticsEnabled !== 'boolean') {
+        typeof config.diagnosticsEnabled !== 'boolean' ||
+        typeof config.clipboardFallback !== 'boolean') {
       throw new Error('设置响应中的配置格式不正确。');
     }
     return {
       version: 1,
       excludedApps: [...config.excludedApps],
-      diagnosticsEnabled: config.diagnosticsEnabled
+      diagnosticsEnabled: config.diagnosticsEnabled,
+      clipboardFallback: config.clipboardFallback
     };
   }
 
   function readSettings(value) {
     const config = copyConfig(value && value.config);
     if (typeof value.startupEnabled !== 'boolean' || typeof value.startupAvailable !== 'boolean' ||
+        typeof value.fallbackAvailable !== 'boolean' ||
         typeof value.version !== 'string' || typeof value.migratedFromElectron !== 'boolean' ||
         ![value.startupError, value.configError].every(error => error === null || typeof error === 'string')) {
       throw new Error('设置响应格式不正确。');
@@ -52,13 +55,13 @@
     return { ...value, config };
   }
 
-  function draftConfig(text, diagnosticsEnabled) {
-    return { version: 1, excludedApps: parseExcludedApps(text), diagnosticsEnabled };
+  function draftConfig(text, diagnosticsEnabled, clipboardFallback) {
+    return { version: 1, excludedApps: parseExcludedApps(text), diagnosticsEnabled, clipboardFallback };
   }
 
-  function hasChanges(saved, text, diagnosticsEnabled) {
+  function hasChanges(saved, text, diagnosticsEnabled, clipboardFallback) {
     return Boolean(saved) && (text !== saved.excludedApps.join('\n') ||
-      diagnosticsEnabled !== saved.diagnosticsEnabled);
+      diagnosticsEnabled !== saved.diagnosticsEnabled || clipboardFallback !== saved.clipboardFallback);
   }
 
   const api = { parseExcludedApps, copyConfig, readSettings, draftConfig, hasChanges };

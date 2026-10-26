@@ -37,6 +37,11 @@
         </label>
         <p id="startup-hint" class="hint">正在读取开机启动状态…</p>
         <p id="startup-error" class="error" role="alert" hidden></p>
+        <label class="option" for="clipboard-fallback">
+          <input id="clipboard-fallback" type="checkbox" disabled aria-describedby="fallback-hint">
+          <span>兼容复制回退</span>
+        </label>
+        <p id="fallback-hint" class="hint">无障碍取词失败时模拟复制快捷键读取选区。会临时改动剪贴板；私有格式、并发复制或剪贴板管理器可能无法完整恢复。</p>
       </section>
 
       <section aria-labelledby="exclusions-title">

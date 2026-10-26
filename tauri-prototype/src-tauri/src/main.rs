@@ -471,6 +471,8 @@ fn set_paused(app: &tauri::AppHandle, state: &mut State, paused: bool) -> Result
 #[serde(rename_all = "camelCase")]
 struct Settings {
     config: config::Config,
+    /// 仅 Windows 的引擎支持可取消的剪贴板回退；设置页据此禁用开关并说明原因。
+    fallback_available: bool,
     startup_enabled: bool,
     startup_available: bool,
     startup_error: Option<String>,
@@ -487,7 +489,8 @@ fn settings_snapshot(app: &tauri::AppHandle) -> Settings {
     };
     let startup = startup::enabled();
     Settings {
-        config, startup_enabled: startup.as_ref().copied().unwrap_or(false),
+        config, fallback_available: cfg!(target_os = "windows"),
+        startup_enabled: startup.as_ref().copied().unwrap_or(false),
         startup_available: startup::available(), startup_error: startup.err(), startup_note: startup::note(),
         config_error, migrated_from_electron: migrated,
         version: app.package_info().version.to_string(),
@@ -508,6 +511,7 @@ async fn save_settings(app: tauri::AppHandle, window: WebviewWindow, config: con
         let config = config::Config { paused: state.paused, ..config }.validate()?;
         store.save(config.clone())?;
         drop(store);
+        state.fallback = config.clipboard_fallback;
         apply_config(&config);
         invalidate(app, state, "settings_changed");
         Ok::<_, String>(())
@@ -633,9 +637,8 @@ async fn status(app: tauri::AppHandle, window: WebviewWindow) -> Result<Status, 
     on_main(app, |_, state| snapshot(state)).await
 }
 #[tauri::command]
-async fn configure(app: tauri::AppHandle, window: WebviewWindow, paused: bool, fallback: bool) -> Result<Status, String> {
+async fn configure(app: tauri::AppHandle, window: WebviewWindow, paused: bool) -> Result<Status, String> {
     require(&window, "control")?;
-    let _ = fallback;
     on_main(app, move |app, state| {
         set_paused(app, state, paused)?;
         Ok(snapshot(state))
@@ -778,7 +781,12 @@ fn main() {
             let store = config::Store::load(directory.join("config.json"), legacy.as_deref());
             diagnostics::init(directory.join("logs/selection.log"));
             apply_config(&store.config);
-            app.state::<Mutex<State>>().lock().unwrap().paused = store.config.paused;
+            {
+                let managed = app.state::<Mutex<State>>();
+                let mut state = managed.lock().unwrap();
+                state.paused = store.config.paused;
+                state.fallback = store.config.clipboard_fallback;
+            }
             let needs_settings = store.error.is_some() || !unsafe { cp_permission(false) };
             app.manage(Mutex::new(store));
             create_tray(app)?;
