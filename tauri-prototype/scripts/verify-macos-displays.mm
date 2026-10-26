@@ -21,7 +21,6 @@ void cp_hide_popup();
 }
 
 struct Placement {
-    NSString *name;
     double x;
     double y;
     NSRect area;
@@ -70,6 +69,19 @@ static uint64_t FrontWindowOf(int pid) {
     }
     [windows release];
     return number;
+}
+
+// 找一块“前台且确实有普通层窗口”的应用，作为来源校验的对象。
+static NSRunningApplication *FrontmostWithWindow(void) {
+    NSArray<NSRunningApplication *> *apps = NSWorkspace.sharedWorkspace.runningApplications;
+    // 先试当前前台；它可能是没有窗口的通知中心之类的辅助进程。
+    NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
+    if (front && FrontWindowOf(front.processIdentifier) != 0) return front;
+    for (NSRunningApplication *app in apps) {
+        if (app.activationPolicy != NSApplicationActivationPolicyRegular) continue;
+        if (FrontWindowOf(app.processIdentifier) != 0) return app;
+    }
+    return nil;
 }
 
 static bool PanelBounds(NSRect *bounds) {
@@ -137,14 +149,18 @@ int main(int argc, const char **argv) {
             styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
         cp_configure_popup(shell);
 
-        // cp_show_popup 要求来源窗口仍是前台。命令行进程很难在 macOS 14+ 抢到前台激活，
-        // 所以这里不自己造来源窗口，直接把“当前真正的前台应用与它的最前窗口”当作来源——
-        // 校验逻辑照常执行，被测的仍是浮窗定位。
-        int frontPid = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
-        uint64_t frontWindow = FrontWindowOf(frontPid);
-        InputEvent event = {1, 200, 200, 0, frontWindow, frontPid, 0, 0};
+        // cp_show_popup 要求来源窗口仍是前台。命令行进程在 macOS 14+ 很难抢到前台激活，
+        // 所以不自己造来源窗口，而是激活一个“真实存在且有窗口”的应用，把它当作来源；
+        // 校验逻辑照常执行，被测的仍然是浮窗定位。
+        // 不能直接用 frontmostApplication：通知中心之类的辅助进程可能排在最前面却没有窗口。
+        NSRunningApplication *front = FrontmostWithWindow();
+        if (!front) Finish(false, @"找不到带窗口的前台应用，来源校验无法放行");
+        int frontPid = front.processIdentifier;
+        uint64_t frontWindow = 0;
+        InputEvent event = {1, 200, 200, 0, 0, frontPid, 0, 0};
         bool armed = false;
-        for (int attempt = 0; attempt < 20 && !armed; ++attempt) {
+        for (int attempt = 0; attempt < 30 && !armed; ++attempt) {
+            if (attempt % 10 == 0) [front activateWithOptions:0];
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
             frontPid = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
             frontWindow = FrontWindowOf(frontPid);
@@ -157,7 +173,8 @@ int main(int argc, const char **argv) {
         report[@"frontmostWindow"] = @(frontWindow);
         if (!armed) Finish(false, @"拿不到前台应用窗口，来源校验无法放行");
 
-        NSMutableArray<NSValue *> *placements = [NSMutableArray array];
+        // 用字典而不是 NSValue：Placement 里若有对象指针，NSValue 的 getValue:objCType: 会崩。
+        NSMutableArray<NSDictionary *> *placements = [NSMutableArray array];
         double leftmost = 0;
         bool first = true;
         for (NSScreen *screen in screens) {
@@ -165,32 +182,46 @@ int main(int argc, const char **argv) {
             leftmost = first ? NSMinX(frame) : std::min(leftmost, NSMinX(frame));
             first = false;
             NSRect area = CgRect(screen.visibleFrame, top);
-            Placement center = {[NSString stringWithFormat:@"%.0fx%.0f@center", frame.size.width, frame.size.height],
-                NSMidX(frame), top - NSMidY(frame), area};
-            Placement topLeft = {[NSString stringWithFormat:@"%.0fx%.0f@top-left", frame.size.width, frame.size.height],
-                NSMinX(frame) + 30, top - (NSMaxY(frame) - 30), area};
-            Placement bottomRight = {[NSString stringWithFormat:@"%.0fx%.0f@bottom-right", frame.size.width, frame.size.height],
-                NSMaxX(frame) - 30, top - (NSMinY(frame) + 30), area};
-            for (auto &placement : {center, topLeft, bottomRight}) {
-                [placements addObject:[NSValue value:&placement withObjCType:@encode(Placement)]];
-            }
+            NSString *size = [NSString stringWithFormat:@"%.0fx%.0f", frame.size.width, frame.size.height];
+            [placements addObject:@{ @"name": [size stringByAppendingString:@"@center"],
+                @"x": @(NSMidX(frame)), @"y": @(top - NSMidY(frame)),
+                @"area": NSStringFromRect(area) }];
+            [placements addObject:@{ @"name": [size stringByAppendingString:@"@top-left"],
+                @"x": @(NSMinX(frame) + 30), @"y": @(top - (NSMaxY(frame) - 30)),
+                @"area": NSStringFromRect(area) }];
+            [placements addObject:@{ @"name": [size stringByAppendingString:@"@bottom-right"],
+                @"x": @(NSMaxX(frame) - 30), @"y": @(top - (NSMinY(frame) + 30)),
+                @"area": NSStringFromRect(area) }];
         }
         // 虚拟桌面之外的锚点应当落到最近的屏幕上，而不是一律回落到主屏。
         NSPoint outside = NSMakePoint(leftmost - 200, NSMidY(primary.frame));
         NSScreen *nearest = NearestScreen(outside);
-        Placement offscreen = {@"outside-desktop", outside.x, top - outside.y, CgRect(nearest.visibleFrame, top)};
-        [placements addObject:[NSValue value:&offscreen withObjCType:@encode(Placement)]];
+        NSRect outsideArea = CgRect(nearest.visibleFrame, top);
+        [placements addObject:@{ @"name": @"outside-desktop",
+            @"x": @(outside.x), @"y": @(top - outside.y),
+            @"area": NSStringFromRect(outsideArea) }];
 
         bool passed = true;
         NSMutableArray *results = [NSMutableArray array];
-        for (NSValue *value in placements) {
+        for (NSDictionary *entry in placements) {
             Placement item;
-            [value getValue:&item objCType:@encode(Placement)];
+            item.x = [entry[@"x"] doubleValue];
+            item.y = [entry[@"y"] doubleValue];
+            item.area = NSRectFromString(entry[@"area"]);
+            NSString *name = entry[@"name"];
             cp_hide_popup();
+            // orderOut 之后必须让窗口服务器跑完一轮，否则紧接着的 orderFrontRegardless
+            // 有时不会出现在 CGWindowList 里（表现为浮窗“时有时无”地交替出现）。
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.15]];
+            bool sourceOk = cp_source_matches(frontPid, frontWindow);
             bool shown = cp_show_popup(nullptr, item.x, item.y);
-            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+            // 面板上屏有延迟，轮询而不是固定等待。
+            NSRect polled = NSZeroRect;
+            for (int wait = 0; wait < 10 && !PanelBounds(&polled); ++wait) {
+                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+            }
             NSPoint expected = Expected(item.x, item.y, item.area);
-            NSRect actual = NSZeroRect;
+            NSRect actual = polled;
             bool visible = shown && PanelBounds(&actual);
             double dx = visible ? actual.origin.x - expected.x : NAN;
             double dy = visible ? actual.origin.y - expected.y : NAN;
@@ -200,11 +231,14 @@ int main(int argc, const char **argv) {
             bool ok = visible && std::fabs(dx) <= 1.5 && std::fabs(dy) <= 1.5 && inside && hit && miss;
             if (!ok) passed = false;
             [results addObject:@{
-                @"name": item.name,
+                @"name": name,
                 @"anchor": [NSString stringWithFormat:@"(%.0f,%.0f)", item.x, item.y],
                 @"expected": [NSString stringWithFormat:@"(%.0f,%.0f)", expected.x, expected.y],
                 @"actual": visible ? [NSString stringWithFormat:@"(%.0f,%.0f)", actual.origin.x, actual.origin.y] : @"hidden",
                 @"delta": visible ? [NSString stringWithFormat:@"(%.1f,%.1f)", dx, dy] : @"-",
+                @"sourceMatched": @(sourceOk),
+                @"accepted": @(shown),
+                @"liveFrontPid": @(NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier),
                 @"insideWorkArea": @(inside),
                 @"insideHitTest": @(hit),
                 @"outsideHitTest": @(!miss),
