@@ -96,6 +96,27 @@ Electron 版 `clipboardFallback` 会在首次启动迁移时沿用；启动项�
 
 **限制：** 只在 Windows 真机跑了关闭确认；托盘菜单的「停用最近应用」条目仍未人工点击验证（写入路径与 `settings-changed` 已由 Node 测试和同一事件通道覆盖）。macOS 侧 `close-blocked` 仍无真机验证。
 
+## 多显示器浮窗定位（2026-10-26）
+
+原实现用 `NSScreen.screens.firstObject.frame.size.height` 做 Y 翻转，并按数组顺序找目标屏。翻转参考必须是主屏（Cocoa 全局坐标的原点屏），而数组顺序不能当作主屏判据：一旦首元素不是主屏，副屏上的浮窗会整体偏移“两块屏高度差”那么多。本机刚好是这个形态：
+
+| 屏幕 | Cocoa frame | 屏幕坐标（主屏左上角原点） |
+|---|---|---|
+| 内建 Color LCD | `(0,0 1440x900)`，2x | `(0,0 1440x900)` |
+| PHL 275S1 | `(-2048,0 2048x1152)`，2x | `(-2048,-252 2048x1152)`，工作区高 1122 |
+
+改动：
+
+1. 主屏改为按 `frame.origin == (0,0)` 认定，`cp_show_popup` 与 `cp_inside_popup` 共用同一个参考高度。
+2. 锚点落在所有屏幕之外时选择**最近的屏幕**，而不是一律回落到主屏；已经拔掉的显示器留下的坐标也能落在合理位置。
+3. 定位数学抽到 `src-tauri/native/placement.h`（`PlacePopup`、`CocoaToScreenY`/`ScreenToCocoaY`），Objective-C 只在调用点各做一次坐标换算。纯函数用 `test/placement.test.cjs` 回归：正常锚点、右/左/下边缘钳制、下方放不下时翻到上方、锚点越过工作区、副屏负 x 负 y、工作区比浮窗还窄/矮，跨平台编译执行。
+
+新增真机夹具 `scripts/verify-macos-displays.cjs` + `.mm`：不经过 Rust，直接把 `bridge.mm` 编进原生夹具，逐屏取中心、左上、右下三个锚点，再加一个虚拟桌面之外的锚点，断言浮窗落点与夹具里**独立算出**的期望相差不超过 1.5 pt、落在目标屏工作区内，并核对 `cp_inside_popup` 的命中/不命中。
+
+**本轮状态：** 纯几何测试通过、`bridge.mm` 编译通过；逐屏真机断言尚未执行——当次 macOS 桌面处于锁屏（`ioreg` 的 `IOConsoleLocked=true`，前台应用是 `loginwindow`），`cp_show_popup` 的来源校验必然失败。脚本已加 `requireUnlockedDesktop()`，锁屏时直接报未执行而不是定位失败，解锁后执行 `node scripts/verify-macos-displays.cjs` 即可补齐。
+
+顺带记录：本机 Rust 工具链在本轮开始时已不存在（`~/.cargo` 与 `~/.rustup` 为空，只有遗留的 `target/`），用 `rsproxy` 镜像重装 1.99.1 后才恢复构建能力；`scripts/cargo-mirror.toml` 已复制到 `~/.cargo/config.toml`。
+
 ## v0.1.0 产品化验收（2026-10-26）
 
 本轮针对完整产品行为（单实例、托盘、设置页、配置持久化、关闭常驻、开机启动、退出）在最终源码上重新 build 和 package。Windows 环境为 OMEN Windows 11 x64 build 26200、2560×1440、150% 缩放、已登录 console Session 2；所有桌面交互经普通权限 Interactive 计划任务执行，未绕过锁屏或权限。

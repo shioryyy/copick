@@ -13,6 +13,7 @@
 #include "lib/clipboard.h"
 #include "lib/utils.h"
 #include "operation_gate.h"
+#include "placement.h"
 
 extern "C" {
 struct InputEvent {
@@ -452,22 +453,50 @@ extern "C" bool cp_snapshot_control(void *pointer, const char *path) {
 }
 extern "C" void cp_hide_popup() { [panel orderOut:nil]; }
 
+// Cocoa 的全局屏幕坐标以主屏左下角为原点，AX 与 CGEvent 的屏幕坐标以主屏左上角为原点。
+// 主屏就是 frame.origin 为 (0,0) 的那块屏——不能假定 [NSScreen screens] 的顺序，
+// 多显示器下高度不同时，用错参考高度会让副屏上的浮窗整体纵向偏移。
+static NSScreen *CpPrimaryScreen(void) {
+    for (NSScreen *screen in NSScreen.screens) {
+        if (screen.frame.origin.x == 0 && screen.frame.origin.y == 0) return screen;
+    }
+    return NSScreen.screens.firstObject;
+}
+
+static CGFloat CpScreenTop(void) {
+    NSScreen *primary = CpPrimaryScreen();
+    return primary ? primary.frame.size.height : 0;
+}
+
+// 锚点可能落在所有屏幕之外（选区贴着屏幕边缘，或坐标来自已被拔掉的显示器）：
+// 取最近的一块屏，而不是一律回落到主屏。
+static NSScreen *CpScreenForAnchor(NSPoint anchor) {
+    NSScreen *nearest = CpPrimaryScreen();
+    CGFloat best = CGFLOAT_MAX;
+    for (NSScreen *screen in NSScreen.screens) {
+        NSRect frame = screen.frame;
+        if (NSPointInRect(anchor, frame)) return screen;
+        CGFloat dx = anchor.x < NSMinX(frame) ? NSMinX(frame) - anchor.x : (anchor.x > NSMaxX(frame) ? anchor.x - NSMaxX(frame) : 0);
+        CGFloat dy = anchor.y < NSMinY(frame) ? NSMinY(frame) - anchor.y : (anchor.y > NSMaxY(frame) ? anchor.y - NSMaxY(frame) : 0);
+        CGFloat distance = dx * dx + dy * dy;
+        if (distance < best) { best = distance; nearest = screen; }
+    }
+    return nearest;
+}
+
 extern "C" bool cp_show_popup(void *, double x, double y) {
     NSWindow *window = panel;
     if (!window || !std::isfinite(x) || !std::isfinite(y) || !cp_source_matches(sourcePid, sourceWindow) || NSScreen.screens.count == 0) {
         [window orderOut:nil];
         return false;
     }
-    CGFloat top = NSScreen.screens.firstObject.frame.size.height;
-    NSScreen *target = NSScreen.screens.firstObject;
-    NSPoint anchor = NSMakePoint(x, top - y);
-    for (NSScreen *screen in NSScreen.screens) if (NSPointInRect(anchor, screen.frame)) { target = screen; break; }
-    NSRect area = target.visibleFrame;
-    double left = std::max(NSMinX(area), std::min(x + 10, NSMaxX(area) - 88));
-    double bottom = top - y - 12 - 40;
-    if (bottom < NSMinY(area)) bottom = top - y + 12;
-    bottom = std::max(NSMinY(area), std::min(bottom, NSMaxY(area) - 40));
-    [window setFrameOrigin:NSMakePoint(left, bottom)];
+    CGFloat top = CpScreenTop();
+    NSScreen *target = CpScreenForAnchor(NSMakePoint(x, copick::ScreenToCocoaY(y, top)));
+    if (!target) { [window orderOut:nil]; return false; }
+    NSRect visible = target.visibleFrame;
+    copick::Rect placed = copick::PlacePopup(x, y, {NSMinX(visible), copick::CocoaToScreenY(NSMaxY(visible), top),
+                                                    NSWidth(visible), NSHeight(visible)});
+    [window setFrameOrigin:NSMakePoint(placed.x, copick::ScreenToCocoaY(placed.y + placed.height, top))];
     [window orderFrontRegardless];
     bool shown = window.visible && cp_source_matches(sourcePid, sourceWindow);
     if (!shown) [window orderOut:nil];
@@ -476,8 +505,7 @@ extern "C" bool cp_show_popup(void *, double x, double y) {
 
 extern "C" bool cp_inside_popup(void *, double x, double y) {
     NSWindow *window = panel;
-    CGFloat top = NSScreen.screens.firstObject.frame.size.height;
-    return window.visible && NSPointInRect(NSMakePoint(x, top - y), window.frame);
+    return window.visible && NSPointInRect(NSMakePoint(x, copick::ScreenToCocoaY(y, CpScreenTop())), window.frame);
 }
 
 extern "C" void cp_open_settings() {
