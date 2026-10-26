@@ -33,10 +33,27 @@ Electron 版 `clipboardFallback` 会在首次启动迁移时沿用；启动项�
 1. `verify-windows.cs` 的 `SentinelIntact()` 要求剪贴板序列号停在守护进程写入的那一版。开启回退后，产品必然备份并重写剪贴板，序列号一定前进，该断言在回退场景下不可能成立。现改为：回退场景以**文本内容**判定恢复完成（`clipboardRestoredBeforeClick`），并单独记录 `clipboardSequenceBumped`；格式完整性与最终写回仍由守护进程报告独立核验。其余场景继续使用严格判据。
 2. `scripts/verify-windows.ps1` 在 `fallback` / `fallback-disabled` 前显式写入平台配置（`%APPDATA%\local.copick.tauri\config.json`），否则 Windows 默认开启后 `fallback-disabled` 失去对照意义。写入必须是无 BOM 的 UTF-8——`serde_json` 不接受 BOM，带 BOM 时会静默回落到默认值。运行结束后还原原始配置。
 
+### Windows 终端与凭据过滤（2026-10-26）
+
+原实现的全局排除列表只有密码管理器，终端与凭据界面只出现在复制回退列表里，这意味着在 cmd、PowerShell、Windows Terminal、UAC/登录界面上仍会建立选区监听。现将 Electron 版 `policy.js` 的 `PROTECTED` 对齐进全局列表：
+
+| 类别 | 程序片段 | 生效方式 |
+|---|---|---|
+| 终端与远程会话 | `windowsterminal`、`windowsterminalpreview`、`openconsole`、`conhost`、`cmd.exe`、`powershell`、`pwsh`、`wsl`、`wslhost`、`bash.exe`、`mintty`、`putty`、`kitty.exe`、`wezterm`、`alacritty`、`hyper.exe`、`tabby`、`ssh.exe`、`mobaxterm`、`xshell`、`securecrt` | 全局排除，不建立选区监听 |
+| 凭据与系统界面 | `credentialuibroker.exe`、`logonui.exe` | 全局排除 |
+| 密码管理器 | `1password`、`onepassword`、`bitwarden`、`lastpass`、`keepass`、`dashlane`、`nordpass`、`keeper`、`roboform`、`enpass` | 全局排除 |
+| IDE | `code.exe`、`code - insiders`、`vscodium`、`cursor`、`windsurf`、`trae`、`devenv`、`idea`、`pycharm`、`webstorm`、`phpstorm`、`clion`、`rider`、`goland`、`datagrip`、`rubymine`、`rustrover`、`fleet` | 只排除复制回退，UIA/MSAA 仍可用 |
+
+列表移入 `src-tauri/native/programs.h`，由 `bridge_win.cc` 与测试共用。新增 `test/programs.test.cjs` 用 MSVC（`/utf-8`）与 clang++ 分别编译探针，断言真实程序名（`PowerShell_ISE.exe`、`CredentialUIBroker.exe`、`LogonUI.exe`、`1password.exe`、`copick-tauri-prototype.exe` 等）命中，`notepad.exe`、`word.exe` 不命中，且 IDE 不在全局列表里。
+
+真机回归（同一构建）：`double`、`drag` 仍为 `method=1`；`fallback` 连续 6 次通过，另用新复制的可执行文件连跑 2 次冷启动也通过。
+
+**限制：** 未在真实 cmd/PowerShell 窗口做人工点击验证，过滤逻辑依赖上游对程序名的子串匹配——程序名恰好包含上述片段的应用也会被排除。macOS 侧列表本轮未改。
+
 ### 已知限制
 
 - 回退过程中剪贴板序列号会前进；剪贴板管理器（如 Win+V）可能记录一次中间内容。私有格式、并发复制与恢复期间的进程退出仍不保证完整恢复。
-- 本轮早期出现过连续两次取词在 2 秒截止内未完成（`COPICK_CAPTURE_TIMEOUT`），随后六轮连续通过，未能定位根因；与历史记录中「Windows fallback 曾首次失败、复跑 `method=99` 通过」的偶发一致，暂不改动超时。
+- 回退场景存在偶发失败，共观察到两种：`COPICK_CAPTURE_TIMEOUT`（2 秒截止内未完成）与 `COPICK_CAPTURE_EMPTY`（引擎返回空，可能是 `OpenClipboard` 与测试守护进程竞争失败）。都只在本轮首次运行或紧接重新构建之后出现过；同一构建随后连续 6 次、以及新复制的可执行文件冷启动 2 次均通过。未能定位根因，与历史记录中「Windows fallback 曾首次失败、复跑 `method=99` 通过」的偶发一致，本轮不改动超时。
 - 只验证了自绘 WinForms 控件这一条回退路径；Excel、PDF 阅读器、微信、资源管理器等真实应用仍待兼容矩阵复测。
 - macOS 回退保持关闭，本轮没有新增 macOS 端回退验证。
 

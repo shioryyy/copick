@@ -21,6 +21,7 @@
 #include <string>
 #include <thread>
 
+#include "programs.h"
 #include "windows_input_source.h"
 #include "operation_gate.h"
 #include "core/engine.h"
@@ -463,10 +464,11 @@ extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback ca
         request->config.mouseDownCursor = source.downCursor;
         request->config.mouseUpCursor = reinterpret_cast<HCURSOR>(input->mouseUpCursor);
         request->config.globalFilterMode = FilterMode::ExcludeList;
-        request->config.globalFilterList = {"copick", "1password", "onepassword", "bitwarden", "lastpass", "keepass", "dashlane", "nordpass", "keeper", "roboform", "enpass"};
-        request->config.globalFilterList.insert(request->config.globalFilterList.end(), excludedApps.begin(), excludedApps.end());
+        request->config.globalFilterList = copick::WithExcluded(copick::ProtectedPrograms(), excludedApps);
         request->config.clipboardFilterMode = FilterMode::ExcludeList;
-        request->config.clipboardFilterList = {"windowsterminal", "openconsole", "conhost", "cmd.exe", "powershell", "pwsh", "wsl", "mintty", "wezterm", "alacritty", "kitty", "hyper.exe", "putty", "mobaxterm", "xshell", "securecrt", "tabby", "code.exe", "code - insiders", "vscodium", "cursor", "windsurf", "trae", "devenv", "idea", "pycharm", "webstorm", "phpstorm", "clion", "rider", "goland", "datagrip", "rubymine", "rustrover", "fleet"};
+        // 终端与凭据界面已由全局列表拦截；复制备份列表再追加 IDE 与用户排除项，
+        // 与 Electron 版 [...blockedPrograms, ...NO_CLIPBOARD] 的组合方式一致。
+        request->config.clipboardFilterList = copick::ClipboardExclusions(excludedApps);
         if (!RunRequest(request)) return false;
         State().delivered = source;
         return true;
