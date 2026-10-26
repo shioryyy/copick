@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 if (location.pathname.endsWith('/popup.html')) {
   contextBridge.exposeInMainWorld('copickPopup', {
     onSelection: callback => ipcRenderer.on('popup:selection', (_event, token) => callback(token)),
+    ready: token => ipcRenderer.invoke('popup:ready', token),
     copy: token => ipcRenderer.invoke('popup:copy', token)
   });
 } else if (location.pathname.endsWith('/settings.html')) {
@@ -12,6 +13,8 @@ if (location.pathname.endsWith('/popup.html')) {
     save: value => ipcRenderer.invoke('settings:save', value),
     onState: callback => ipcRenderer.on('settings:state', (_event, value) => callback(value)),
     openAccessibility: () => ipcRenderer.invoke('settings:open-accessibility'),
-    openLoginItems: () => ipcRenderer.invoke('settings:open-login-items')
+    openLoginItems: () => ipcRenderer.invoke('settings:open-login-items'),
+    setDiagnostics: enabled => ipcRenderer.invoke('settings:diagnostics', enabled),
+    openLogs: () => ipcRenderer.invoke('settings:open-logs')
   });
 }

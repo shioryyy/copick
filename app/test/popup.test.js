@@ -12,11 +12,16 @@ function harness(copy) {
     addEventListener: (name, handler) => { listeners[name] = handler; } };
   const label = { textContent: '' };
   let select;
+  const frames = [], ready = [];
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'popup.js'), 'utf8'), {
     document: { getElementById: id => id === 'copy' ? button : label },
-    window: { copickPopup: { onSelection: callback => { select = callback; }, copy } }
+    requestAnimationFrame: callback => frames.push(callback),
+    window: { copickPopup: { onSelection: callback => { select = callback; }, copy,
+      ready: async token => { ready.push({ token, state: button.dataset.state, label: label.textContent }); } } }
   });
-  return { button, label, attributes, select: value => select(value), click: () => listeners.click() };
+  return { button, label, attributes, ready,
+    frame: () => frames.splice(0).forEach(callback => callback()),
+    select: value => select(value), click: () => listeners.click() };
 }
 
 test('复制成功显示确认并保持禁用，新选区恢复复制按钮', async () => {
@@ -31,6 +36,25 @@ test('复制成功显示确认并保持禁用，新选区恢复复制按钮', as
   assert.equal(h.label.textContent, '复制');
   assert.equal(h.button.dataset.state, 'ready');
   assert.equal(h.button.disabled, false);
+});
+
+test('新选区完成重置和绘制周期后才确认显示，丢弃旧选区帧回调', async () => {
+  const h = harness(async () => true);
+  h.select('first');
+  h.frame(); h.frame();
+  await h.click();
+  assert.equal(h.button.dataset.state, 'copied');
+  h.ready.length = 0;
+  h.select('second');
+  assert.equal(h.button.dataset.state, 'ready');
+  assert.deepEqual(h.ready, []);
+  h.frame();
+  assert.deepEqual(h.ready, []);
+  h.select('third');
+  h.frame();
+  assert.deepEqual(h.ready, []);
+  h.frame();
+  assert.deepEqual(h.ready, [{ token: 'third', state: 'ready', label: '复制' }]);
 });
 
 test('复制失败或异常时允许重试', async () => {

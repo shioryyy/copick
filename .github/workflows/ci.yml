@@ -52,7 +52,10 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      # Loads the bundled selection-hook native module inside Electron and exits.
+      - name: Build foreground identity module
+        run: npm run build:native
+
+      # Loads both native modules inside Electron and exits.
       # No global hooks, no synthetic keys; proves the prebuild matches this OS/arch/Electron.
       - name: Native module smoke test
         shell: bash

@@ -6,10 +6,24 @@ const { randomUUID } = require('node:crypto');
 const { loadConfig, saveConfig } = require('./config');
 const { PROTECTED, NO_CLIPBOARD, validateConfig, blockedPrograms, isBlocked, validPoint, popupBounds } = require('./policy');
 const { createDiagnostics, errorMetadata, diagnosticsEnabled } = require('./diagnostics');
+const { programName } = require('./program-names');
+const { readForeground, sameApplication } = require('./foreground');
 
 let hook, popup, settings, tray, config, configFile, diagnostics;
 let current = null, expiry, ready = false, lastProgram = '', failure = null;
-let permissionGranted = null;
+let permissionGranted = null, helpRequest = 0, quitRequested = false;
+function setDiagnostics(enabled) {
+  if (enabled && !diagnostics) {
+    diagnostics = createDiagnostics(app.getPath('logs'));
+    diag('diagnostics-enabled', { ...gateState(), accessibility: permissionGranted }, 0);
+  } else if (!enabled) diagnostics = null;
+  publish();
+}
+function showHelp() {
+  helpRequest++;
+  showSettings();
+  publish();
+}
 const permissionMessage = '需要辅助功能权限，选区监听已暂停。请在系统设置中允许 Copick，然后重新检查权限。';
 function diag(event, metadata, interval) { if (diagnostics) diagnostics.log(event, metadata, interval); }
 const page = name => path.join(__dirname, `${name}.html`);
@@ -24,6 +38,17 @@ function hidePopup(reason = 'internal') {
   current = null;
   if (popup && !popup.isDestroyed()) popup.hide();
 }
+function foreground() {
+  try { return readForeground(); }
+  catch (error) { diag('foreground-error', errorMetadata(error)); return null; }
+}
+function checkSelectionSource() {
+  if (!current || current.copied) return false;
+  const active = foreground();
+  if (sameApplication(current.source, active)) return true;
+  hidePopup(active ? 'foreground-changed' : 'foreground-unavailable');
+  return false;
+}
 function loginItemActual() {
   try { return app.getLoginItemSettings(loginItemOptions()).openAtLogin === true; } catch { return null; }
 }
@@ -33,7 +58,8 @@ function state() {
     protectedPrograms: [...PROTECTED], noClipboardPrograms: [...NO_CLIPBOARD], lastProgram,
     accessibility: permissionGranted, permissionMessage: permissionGranted === false ? permissionMessage : null,
     loginItemActive: login.active, loginItemMessage: login.message,
-    running: Boolean(hook?.isRunning()), error: failure, configPath: configFile };
+    running: Boolean(hook?.isRunning()), error: failure, configPath: configFile,
+    diagnosticsEnabled: Boolean(diagnostics), helpRequest };
 }
 function publish() {
   if (settings && !settings.isDestroyed()) settings.webContents.send('settings:state', state());
@@ -100,7 +126,7 @@ function loginItemState() {
   if (isWindows) {
     return { active: false, message: loginItemEntry(settings)
       ? '启动项已被系统禁用，请在「任务管理器 > 启动应用」中重新启用。'
-      : '系统尚未登记启动项，请重新保存设置。' };
+      : '系统尚未登记启动项，请点击“重试登记”。' };
   }
   return { active: false, message: settings.status === 'requires-approval'
     ? '需要在「系统设置 > 通用 > 登录项」中允许 Copick，否则不会开机启动。'
@@ -174,7 +200,8 @@ function safeUpdate(next) {
 function secureWindow(options) {
   const window = new BrowserWindow({ ...options, icon, webPreferences: {
     preload, contextIsolation: true, sandbox: true, nodeIntegration: false,
-    webSecurity: true, devTools: false, spellcheck: false
+    webSecurity: true, devTools: false, spellcheck: false,
+    ...(options.focusable === false ? { backgroundThrottling: false } : {})
   } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
@@ -196,35 +223,52 @@ function showSettings() {
     title: 'Copick 设置', backgroundColor: '#f5f6f8', autoHideMenuBar: true });
   settings.loadFile(page('settings'));
   settings.on('focus', refreshPermissions);
+  settings.webContents.on('will-prevent-unload', event => {
+    const choice = dialog.showMessageBoxSync(settings, {
+      type: 'question', title: '保留未保存的更改？',
+      message: '排除应用尚未保存，或设置正在保存。',
+      detail: '继续编辑可保留当前内容。放弃并关闭会丢弃尚未保存的应用列表；已自动保存的开关仍然生效。',
+      buttons: ['继续编辑', '放弃并关闭'], defaultId: 0, cancelId: 0, noLink: true
+    });
+    // Electron 在此事件上 preventDefault 表示允许关闭被 beforeunload 阻止的页面。
+    if (choice === 1) event.preventDefault();
+    else quitRequested = false;
+  });
   settings.on('closed', () => {
     settings = null;
+    helpRequest = 0;
     if (isMac) app.dock?.hide();
+    if (quitRequested) { quitRequested = false; app.quit(); }
   });
 }
 function rebuildTray() {
   if (!tray) return;
-  const login = loginItemState();
-  tray.setToolTip(`Copick · ${permissionGranted === false ? '需要辅助功能权限' : failure ? '需要检查设置' : config.paused ? '已暂停' : '运行中'}`);
+  const status = permissionGranted === false ? '需要辅助功能权限' : failure ? '需要检查设置'
+    : config.paused ? '已暂停' : hook?.isRunning() ? '运行中' : '监听未启动';
+  tray.setToolTip(`Copick · ${status}`);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Copick · 本地划词复制', enabled: false },
+    { label: `Copick · ${status}`, enabled: false },
     { label: '暂停划词', type: 'checkbox', checked: config.paused,
       click: item => safeUpdate({ ...config, paused: item.checked }) },
-    { label: `启用快捷键回退（${isMac ? '⌘C' : 'Ctrl+C'}）`, type: 'checkbox', checked: config.clipboardFallback,
-      click: item => safeUpdate({ ...config, clipboardFallback: item.checked }) },
-    { label: `开机自动启动${config.launchAtLogin && !login.active ? '（未生效）' : ''}`, type: 'checkbox', checked: config.launchAtLogin,
-      click: item => safeUpdate({ ...config, launchAtLogin: item.checked }) },
-    { type: 'separator' },
-    { label: lastProgram ? `禁用最近取词应用：${lastProgram}` : '禁用最近取词应用',
+    { label: lastProgram ? `在此应用中停用：${programName(lastProgram).replace(/&/g, '&&')}` : '在最近取词应用中停用',
       enabled: Boolean(lastProgram && !isBlocked(lastProgram, config)),
       click: () => safeUpdate({ ...config, blacklist: [...config.blacklist, lastProgram.toLowerCase()] }) },
-    { label: '设置与应用黑名单…', click: showSettings },
-    ...(isMac ? [
-      { label: permissionGranted ? '辅助功能权限：已授权' : '辅助功能权限：未授权', enabled: false },
-      { label: '重新检查辅助功能权限', click: refreshPermissions },
-      { label: '打开辅助功能设置…', click: openAccessibilitySettings }
-    ] : []),
-    { label: diagnostics ? '打开诊断日志目录…' : '诊断日志：未开启（--diagnostics）', enabled: Boolean(diagnostics),
-      click: () => { shell.openPath(app.getPath('logs')).catch(() => {}); } },
+    { type: 'separator' },
+    { label: '设置…', click: showSettings },
+    { label: '帮助与诊断', submenu: [
+      { label: '没有出现复制按钮？', click: showHelp },
+      ...(isMac ? [
+        { type: 'separator' },
+        { label: permissionGranted ? '辅助功能权限：已授权' : '辅助功能权限：未授权', enabled: false },
+        { label: '重新检查辅助功能权限', click: refreshPermissions },
+        { label: '打开辅助功能设置…', click: openAccessibilitySettings }
+      ] : []),
+      { type: 'separator' },
+      { label: '记录诊断日志（仅本次运行）', type: 'checkbox', checked: Boolean(diagnostics),
+        click: item => setDiagnostics(item.checked) },
+      { label: '打开诊断日志目录…', enabled: Boolean(diagnostics),
+        click: () => { shell.openPath(app.getPath('logs')).catch(() => {}); } }
+    ] },
     { type: 'separator' },
     { label: '退出 Copick', click: () => app.quit() }
   ]));
@@ -263,15 +307,42 @@ function installIPC() {
     openAccessibilitySettings();
     return true;
   });
+  ipcMain.handle('settings:diagnostics', (event, enabled) => {
+    if (!guard(event, settings, 'settings', 'settings:diagnostics') || typeof enabled !== 'boolean') {
+      throw new Error('Invalid request');
+    }
+    setDiagnostics(enabled);
+    return state();
+  });
+  ipcMain.handle('settings:open-logs', async event => {
+    if (!guard(event, settings, 'settings', 'settings:open-logs')) throw new Error('Invalid sender');
+    if (!diagnostics) throw new Error('请先开启诊断日志。');
+    const error = await shell.openPath(app.getPath('logs'));
+    if (error) throw new Error('无法打开日志目录。');
+    return true;
+  });
   ipcMain.handle('settings:open-login-items', event => {
     if (!guard(event, settings, 'settings', 'settings:open-login-items')) throw new Error('Invalid sender');
     openLoginItemsSettings();
     return true;
   });
+  ipcMain.handle('popup:ready', (event, token) => {
+    if (!guard(event, popup, 'popup', 'popup:ready') || !current || current.presented ||
+        token !== current.token || config.paused || failure || !hook.isRunning() ||
+        (isMac && permissionGranted !== true) || Date.now() > current.expires || !checkSelectionSource()) return false;
+    current.presented = true;
+    popup.showInactive();
+    // 源应用本身置顶时仍需将浮窗移到同一层级的顶部。
+    if (typeof popup.moveTop === 'function') popup.moveTop();
+    counts.shown++;
+    diag('selection-shown', current.metadata);
+    return true;
+  });
   ipcMain.handle('popup:copy', (event, token) => {
-    if (!guard(event, popup, 'popup', 'popup:copy') || !current || current.copied || token !== current.token ||
+    if (!guard(event, popup, 'popup', 'popup:copy') || !current || !current.presented || current.copied || token !== current.token ||
         config.paused || (isMac && permissionGranted !== true) || !hook.isRunning() || failure ||
         Date.now() > current.expires || isBlocked(current.program, config)) return false;
+    if (!checkSelectionSource()) return false;
     // Native method serializes against fallback clipboard transactions; Electron.writeText does not.
     const success = hook.writeToClipboard(current.text);
     if (success) {
@@ -299,6 +370,11 @@ function showSelection(data) {
   if (typeof data.text !== 'string' || !data.text.trim()) return drop('empty-text');
   if (data.text.length > 1024 * 1024) return drop('text-too-long');
   if (metadata.settingsFocused) return drop('settings-focused');
+  const source = foreground();
+  if (!source || source.program !== data.programName.toLowerCase()) {
+    hidePopup(source ? 'foreground-changed' : 'foreground-unavailable');
+    return drop(source ? 'foreground-changed' : 'foreground-unavailable');
+  }
   // Hook coordinates are physical pixels; Electron window bounds use DIP on Windows.
   const raw = data.posLevel >= hook.constructor.PositionLevel.SEL_FULL && validPoint(data.endBottom)
     ? data.endBottom : data.mousePosEnd;
@@ -310,18 +386,14 @@ function showSelection(data) {
     metadata.cursorDistance = end ? Math.hypot(end.x - cursor.x, end.y - cursor.y) : null;
     if (end && metadata.cursorDistance > 100) return drop('cursor-moved');
   }
+  hidePopup('new-selection');
   lastProgram = data.programName;
-  current = { text: data.text, program: data.programName, token: randomUUID(), expires: Date.now() + 7000 };
+  current = { text: data.text, program: data.programName, source, metadata,
+    token: randomUUID(), expires: Date.now() + 7000, presented: false };
   popup.setBounds(popupBounds(point, screen.getDisplayNearestPoint(point).workArea));
-  popup.webContents.send('popup:selection', current.token);
-  popup.showInactive();
-  // Source apps that are themselves always-on-top share the topmost band; without this the
-  // popup can stay underneath them and clicks land on the source window instead.
-  if (typeof popup.moveTop === 'function') popup.moveTop();
-  counts.shown++;
-  diag('selection-shown', metadata);
-  clearTimeout(expiry);
+  // 隐藏时先重置页面；等渲染器确认新选区已准备好，再显示，避免复用旧的绿色帧。
   expiry = setTimeout(() => hidePopup('timeout'), 7000);
+  popup.webContents.send('popup:selection', current.token);
   publish();
 }
 
@@ -338,11 +410,20 @@ if (!isMac && !isWindows) {
   if (isWindows) app.setAppUserModelId('local.copick.app');
   app.on('second-instance', () => { if (tray) showSettings(); });
   app.on('activate', (_event, hasVisibleWindows) => {
-    // Only reopen from the Dock when no window is visible; popup interaction is not a settings request.
-    if (tray && !hasVisibleWindows && !current && !popup?.isVisible()) showSettings();
+    // 浮窗隐藏后仍可能收到激活事件；只恢复已有设置，不把应用激活当作新建窗口的请求。
+    if (tray && settings && !settings.isDestroyed() && !hasVisibleWindows && !current && !popup?.isVisible()) {
+      showSettings();
+    }
   });
   app.on('window-all-closed', () => {});
-  app.on('before-quit', () => { hidePopup(); if (hook) hook.cleanup(); if (tray) tray.destroy(); });
+  app.on('before-quit', event => {
+    // 先关闭设置并确认草稿，再退出，避免取消时复制浮窗已经被 Electron 销毁。
+    if (settings && !settings.isDestroyed()) {
+      event.preventDefault();
+      if (!quitRequested) { quitRequested = true; settings.close(); }
+    }
+  });
+  app.on('will-quit', () => { hidePopup(); if (hook) hook.cleanup(); if (tray) tray.destroy(); });
   app.whenReady().then(() => {
     if (isMac) app.dock?.setIcon(path.join(__dirname, '..', 'assets', 'icon.png'));
     if (diagnosticsEnabled(process.argv)) diagnostics = createDiagnostics(app.getPath('logs'));
@@ -350,6 +431,8 @@ if (!isMac && !isWindows) {
       nodeVersion: process.versions.node, platform: process.platform, arch: process.arch }, 0);
     const SelectionHook = require('selection-hook');
     hook = new SelectionHook();
+    // 启动即验证本机模块可加载，允许当前没有可识别的前台应用。
+    readForeground();
     hook.on('error', error => {
       diag('hook-error', errorMetadata(error));
       failure = '选区监听发生错误。请暂停后恢复，或重新启动 Copick。';
@@ -357,8 +440,8 @@ if (!isMac && !isWindows) {
       publish();
     });
     if (process.argv.includes('--smoke-test')) {
-      // No hooks or synthetic keys: load the bundled native module only.
-      console.log('COPICK_SMOKE_OK selection-hook=2.1.1 native module loaded');
+      // 只加载原生模块并查询前台身份，不启动监听或发送合成按键。
+      console.log('COPICK_SMOKE_OK selection-hook=2.1.1 foreground=Node-API8 native modules loaded');
       app.quit();
       return;
     }
@@ -391,11 +474,12 @@ if (!isMac && !isWindows) {
     tray.on('click', refreshPermissions);
     tray.on('right-click', refreshPermissions);
     hook.on('text-selection', showSelection);
-    if (diagnostics) {
-      hook.on('mouse-up', () => { counts.mouseUp++; });
-      const heartbeat = setInterval(() => diag('heartbeat', { ...counts, ...gateState() }, 0), 30000);
-      heartbeat.unref();
-    }
+    // 只在有待复制选区时查询；切换后清除 token，切回原应用也不会恢复旧选区。
+    const foregroundTimer = setInterval(checkSelectionSource, 200);
+    foregroundTimer.unref();
+    hook.on('mouse-up', () => { if (diagnostics) counts.mouseUp++; });
+    const heartbeat = setInterval(() => { if (diagnostics) diag('heartbeat', { ...counts, ...gateState() }, 0); }, 30000);
+    heartbeat.unref();
     hook.on('mouse-down', data => {
       if (diagnostics) counts.mouseDown++;
       if (!current) return;

@@ -8,6 +8,10 @@ window.copickPopup.onSelection(value => {
   button.dataset.state = 'ready';
   button.setAttribute('aria-label', '复制选中的文字');
   label.textContent = '复制';
+  // 让重置后的样式经过一个绘制周期，隐藏窗口也需保持帧回调运行。
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (token === value) window.copickPopup.ready(value).catch(() => {});
+  }));
 });
 button.addEventListener('pointerdown', event => event.preventDefault());
 button.addEventListener('click', async () => {
