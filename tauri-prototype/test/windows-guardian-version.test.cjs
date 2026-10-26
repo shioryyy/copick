@@ -6,7 +6,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(path.join(__dirname, '../scripts/windows-clipboard-guardian.cs'), 'utf8');
+// Git 在 Windows runner 上按 autocrlf 检出为 CRLF，本机是 LF；
+// 这里统一成 LF，否则按行解析的断言会在 CI 上莫名失败。
+const source = fs.readFileSync(path.join(__dirname, '../scripts/windows-clipboard-guardian.cs'), 'utf8')
+  .replace(/\r\n/g, '\n');
 
 function body(name) {
   const start = source.indexOf(name);
