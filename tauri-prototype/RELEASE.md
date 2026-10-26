@@ -2,7 +2,7 @@
 
 这是独立于 Electron 的 Tauri 打包入口。产品名为 **Copick Tauri**，应用标识为 `local.copick.tauri`，可执行文件名仍为 `copick-tauri-prototype`（Windows 带 `.exe`）。版本取自 `src-tauri/tauri.conf.json`，发布前应同步核对 `package.json` 和 `src-tauri/Cargo.toml` 的版本。
 
-当前默认产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。CI 只生成可下载附件，不创建 GitHub Release、不创建或推送 tag，也不需要 `contents: write`。自动构建通过不等于完成真实安装和桌面功能验收。
+没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了与 Electron 版相同的仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。`tauri.yml` 自身只生成可下载附件，不发布；打 tag 时由 `release.yml` 调用同一份步骤。自动构建通过不等于完成真实安装和桌面功能验收。
 
 ## 构建要求
 
@@ -51,7 +51,24 @@ rustc -vV
 
 `.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`，以及 main push / PR 的 Tauri 路径变化；依赖锁文件、`app/package.json` 和 `app/assets/` 变化也会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
 
-CI 默认不读取签名 secrets，macOS 显式使用 `APPLE_SIGNING_IDENTITY=-` 做 ad-hoc 签名。日志和 job summary 会说明未可信签名、未公证；所有分支与 PR 都只有 `contents: read` 权限。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。上传附件不是对外发布流程。
+CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。
+
+### CI 签名管线
+
+签名与 Electron 版共用同一组仓库 secrets，全部缺失时行为与以前完全一致（macOS ad-hoc、Windows 未签名），不会半途失败：
+
+| Secret | 平台 | 作用 |
+| --- | --- | --- |
+| `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` | macOS | base64 PKCS#12 证书，交给 Tauri 的 `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` |
+| `MAC_SIGNING_IDENTITY` | macOS | 可选，指定签名身份；缺省时由 Tauri 从导入证书里选 Developer ID |
+| `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS | 三者齐全才启用公证（映射到 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`）；有证书但缺公证凭据时只签名 |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows | base64 PFX，build 之后、package 之前用 Windows SDK 的 `signtool` 签可执行文件与 NSIS 安装包 |
+
+Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，签名必须在它之前完成。签名后脚本用 `Get-AuthenticodeSignature` 要求每个文件状态为 `Valid`，否则 job 失败。macOS 若同时给了公证凭据，Tauri 在 `npm run build` 内完成公证与 stapler。
+
+### 与 release.yml 的关系
+
+`tauri.yml` 同时是 `release.yml` 的可复用工作流：打 `v*` tag 时 Electron（`ci.yml`）与 Tauri 并行构建，任一失败都会阻止发布。Tauri 附件默认**不**挂到 GitHub Release，只保留在 Actions 产物里；在仓库设置中新增变量 `COPICK_PUBLISH_TAURI=true` 后，发布步骤会额外上传 `Copick-Tauri-*` 并在 release notes 里加一节「Tauri 重构版（预览）」。关闭时发布步骤会先删掉这些文件再计算 `SHA256SUMS.txt`，避免清单里出现未发布的附件。
 
 ## 校验与安装
 
@@ -88,7 +105,9 @@ npm --prefix tauri-prototype run build -- --config $env:COPICK_TAURI_SIGNING_CON
 npm --prefix tauri-prototype run package
 ```
 
-此覆盖文件只应配置签名，不覆盖产品名、版本、目标和资源。构建后对便携 EXE 和 NSIS EXE 分别用 `Get-AuthenticodeSignature` 确认签名与时间戳；若自行签名，也必须在 `npm run package` 前完成，从而让 SHA-256 对应最终内容。CI 未实现证书导入或远程签名框架，以上配置由用户自行管理；不要把密码、私钥或证书写入仓库。
+此覆盖文件只应配置签名，不覆盖产品名、版本、目标和资源。构建后对便携 EXE 和 NSIS EXE 分别用 `Get-AuthenticodeSignature` 确认签名与时间戳；若自行签名，也必须在 `npm run package` 前完成，从而让 SHA-256 对应最终内容。
+
+CI 的签名走上一节的 secrets 与 `signtool`，不使用这份覆盖配置；两者不要同时启用。远程签名服务（Azure Trusted Signing 等）尚未接入，需要时替换 `Sign Windows artifacts` 步骤。不要把密码、私钥或证书写入仓库。
 
 ## 自动验证与剩余人工确认
 

@@ -117,6 +117,34 @@ Electron 版 `clipboardFallback` 会在首次启动迁移时沿用；启动项�
 
 顺带记录：本机 Rust 工具链在本轮开始时已不存在（`~/.cargo` 与 `~/.rustup` 为空，只有遗留的 `target/`），用 `rsproxy` 镜像重装 1.99.1 后才恢复构建能力；`scripts/cargo-mirror.toml` 已复制到 `~/.cargo/config.toml`。
 
+## Release 流水线与签名（2026-10-26）
+
+`.github/workflows/tauri.yml` 改为可复用工作流（`workflow_call`，声明 8 个可选 secrets），`release.yml` 随之增加 `tauri` 作业，`publish` 依赖 `[build, tauri]`：打 `v*` tag 时 Electron 与 Tauri 并行构建，任一失败都阻止发布。
+
+### 签名管线
+
+| 平台 | 触发条件 | 动作 |
+| --- | --- | --- |
+| macOS | `MAC_CSC_LINK` + `MAC_CSC_KEY_PASSWORD` | 作为 `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` 交给 Tauri 签名；`MAC_SIGNING_IDENTITY` 可选 |
+| macOS | 另有 `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID` | 追加公证（映射到 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`） |
+| macOS | 以上都不存在 | `APPLE_SIGNING_IDENTITY=-` 的 ad-hoc 构建，与之前一致 |
+| Windows | `WIN_CSC_LINK` + `WIN_CSC_KEY_PASSWORD` | 在 `build` 之后、`package` 之前用 Windows SDK 的 `signtool` 签可执行文件与 NSIS 包，再用 `Get-AuthenticodeSignature` 要求 `Valid` |
+| Windows | 不存在 | 保持未签名 |
+
+签名必须早于打包：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，否则哈希对应的仍是未签名内容。
+
+### 发布开关
+
+Tauri 附件默认只留在 Actions 产物里。仓库变量 `COPICK_PUBLISH_TAURI=true` 时，发布步骤额外上传 `Copick-Tauri-*` 并在 release notes 里加「Tauri 重构版（预览）」一节；关闭时发布步骤会先删除这些文件再生成 `SHA256SUMS.txt`，清单里不会出现未发布的附件。Electron 附件与发布正文在变量未设置时完全不变。
+
+### 静态校验
+
+`js-yaml` 能解析三个工作流；`npx @action-validator/cli` 对 `ci.yml`、`release.yml`、`tauri.yml` 均返回 0（仅提示 glob 路径不校验）。RELEASE.md 补充了 secrets 表、签名顺序与 `COPICK_PUBLISH_TAURI` 的说明。
+
+### 未完成：真实 Actions 运行
+
+`workflow_dispatch` 只列出默认分支上已存在的工作流，而 `main` 还没有 `.github/workflows/tauri.yml`；本机也没有 GitHub token（未安装 `gh`、无 `GH_TOKEN`），无法开出 PR 来触发 `pull_request`。因此本轮**没有**在真实 GitHub Actions 上跑过任何一次，签名路径也只有静态审查、没有任何一次真实签名或公证。合并到 `main` 或打开 PR 之后应立即补跑，并核对 job summary 里的签名状态与产物哈希。
+
 ## v0.1.0 产品化验收（2026-10-26）
 
 本轮针对完整产品行为（单实例、托盘、设置页、配置持久化、关闭常驻、开机启动、退出）在最终源码上重新 build 和 package。Windows 环境为 OMEN Windows 11 x64 build 26200、2560×1440、150% 缩放、已登录 console Session 2；所有桌面交互经普通权限 Interactive 计划任务执行，未绕过锁屏或权限。

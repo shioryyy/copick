@@ -17,9 +17,15 @@ jobs:
   build:
     uses: ./.github/workflows/ci.yml
 
+  # Tauri 版本与 Electron 版本一起构建、一起签名。打 tag 时它的失败会阻止发布，
+  # 但默认不把 Tauri 包挂到 Release 上——需要仓库变量 COPICK_PUBLISH_TAURI=true。
+  tauri:
+    uses: ./.github/workflows/tauri.yml
+    secrets: inherit
+
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, tauri]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -52,6 +58,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH_TAURI: ${{ vars.COPICK_PUBLISH_TAURI }}
         run: |
           set -euo pipefail
           # Section starts at "## [VERSION]" and ends before the next "## [".
@@ -76,6 +83,13 @@ jobs:
             echo "- 系统要求：macOS 13+（Apple Silicon）或 Windows 11 x64。"
             echo "- 更新前请从托盘退出旧版。\`SHA256SUMS.txt\` 提供全部附件的 SHA-256 校验值。"
             echo "- 兼容性实测结果见 [docs/COMPATIBILITY.md](https://github.com/${GITHUB_REPOSITORY}/blob/v$VERSION/docs/COMPATIBILITY.md)。"
+            if [[ "${PUBLISH_TAURI:-false}" == "true" ]]; then
+              echo
+              echo "### Tauri 重构版（预览）"
+              echo
+              echo "- 同一 tag 还会附上 \`Copick-Tauri-$VERSION-mac-arm64.zip\`、\`Copick-Tauri-$VERSION-win-x64.zip\` 与 \`Copick-Tauri-Setup-$VERSION-win-x64.exe\`。这是 Rust + Tauri 的重写版本，功能对齐中，遇到问题请优先回退到上面的 Electron 版本。"
+              echo "- 两个版本使用不同的配置目录，可以并存安装；同时运行时只有一个能抢到托盘与取词钩子。"
+            fi
           } > release-body.md
           cat release-body.md
 
@@ -89,6 +103,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH_TAURI: ${{ vars.COPICK_PUBLISH_TAURI }}
         run: |
           set -euo pipefail
           cd dist
@@ -97,6 +112,15 @@ jobs:
           for name in "Copick-$VERSION-mac-arm64.zip" "Copick-$VERSION-win-x64.zip" "Copick-Setup-$VERSION-win-x64.exe"; do
             [[ -f "$name" ]] || { echo "::error::missing $name"; exit 1; }
           done
+          # Tauri 包默认只留在 Actions 产物里：仓库变量 COPICK_PUBLISH_TAURI=true 才挂到 Release。
+          if [[ "${PUBLISH_TAURI:-false}" == "true" ]]; then
+            for name in "Copick-Tauri-$VERSION-mac-arm64.zip" "Copick-Tauri-$VERSION-win-x64.zip" "Copick-Tauri-Setup-$VERSION-win-x64.exe"; do
+              [[ -f "$name" ]] || { echo "::error::missing $name"; exit 1; }
+            done
+          else
+            rm -f Copick-Tauri-*
+            echo 'Tauri packages were built and signed but not attached; set repository variable COPICK_PUBLISH_TAURI=true to include them.' >> "$GITHUB_STEP_SUMMARY"
+          fi
           sha256sum *.zip *.exe > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
