@@ -1,0 +1,104 @@
+name: Tauri packages
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/tauri.yml'
+      - 'tauri-prototype/**'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/assets/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tauri.yml'
+      - 'tauri-prototype/**'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/assets/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Tauri ${{ matrix.label }} (unsigned)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS arm64
+            platform: darwin
+            arch: arm64
+            artifact: copick-tauri-mac-arm64
+          - os: windows-latest
+            label: Windows x64 MSVC
+            platform: win32
+            arch: x64
+            artifact: copick-tauri-win-x64
+    env:
+      # Ad-hoc signing on macOS is not a trusted Developer ID signature or notarization.
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            tauri-prototype/package-lock.json
+
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: node -e "if (process.platform !== process.env.EXPECTED_PLATFORM || process.arch !== process.env.EXPECTED_ARCH) throw new Error('Unexpected runner architecture; native packaging is required')"
+
+      - name: Enable MSVC x64 compiler for native tests and build
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install selection-hook source without Electron install scripts
+        run: npm --prefix app ci --ignore-scripts
+
+      - name: Install Tauri CLI
+        run: npm --prefix tauri-prototype ci
+
+      - name: Test Tauri
+        run: npm --prefix tauri-prototype test
+
+      - name: Build native app or NSIS installer
+        run: npm --prefix tauri-prototype run build
+
+      - name: Smoke test actual binary and package release artifacts
+        run: npm --prefix tauri-prototype run package
+
+      - name: Record signing status
+        shell: bash
+        run: |
+          echo 'Copick Tauri artifacts are unsigned (macOS ad-hoc only) and are not notarized.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Windows portable ZIP requires system Microsoft Edge WebView2 Runtime. NSIS downloads it when needed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Smoke tests check process exit 0 and JSON ok=true; desktop installation and permission checks remain manual. No release or tag is created.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Tauri release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: tauri-prototype/artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14

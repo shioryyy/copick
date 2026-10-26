@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Copick · 设置</title>
+  <link rel="stylesheet" href="control.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <h1>Copick <span>设置</span></h1>
+      <p class="hint">在其他应用中选择文字，点击选区旁的按钮即可复制。</p>
+    </header>
+
+    <section aria-labelledby="listener-title">
+      <h2 id="listener-title">监听状态</h2>
+      <p id="status" role="status">正在连接监听服务…</p>
+      <div class="actions">
+        <button id="permission" type="button" disabled>检查辅助功能权限</button>
+        <button id="pause" type="button" disabled>暂停监听</button>
+      </div>
+      <p id="platform-hint" class="hint">部分应用暂不支持读取选区。</p>
+      <p id="connection-error" class="error" role="alert" hidden></p>
+      <p id="listener-error" class="error" role="alert" hidden></p>
+    </section>
+
+    <p id="config-error" class="error" role="alert" hidden></p>
+    <p id="migration-note" class="hint" hidden>已从 Electron 版导入设置，请检查下方配置。</p>
+    <form id="settings-form" novalidate aria-busy="true">
+      <section aria-labelledby="general-title">
+        <h2 id="general-title">常规</h2>
+        <label class="option" for="startup">
+          <input id="startup" type="checkbox" disabled aria-describedby="startup-hint startup-error">
+          <span>开机启动 Copick</span>
+        </label>
+        <p id="startup-hint" class="hint">正在读取开机启动状态…</p>
+        <p id="startup-error" class="error" role="alert" hidden></p>
+      </section>
+
+      <section aria-labelledby="exclusions-title">
+        <h2 id="exclusions-title">应用排除列表</h2>
+        <label class="field-label" for="excluded-apps">在以下应用中停用划词复制</label>
+        <textarea id="excluded-apps" rows="4" disabled spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="exclusions-hint exclusions-error" placeholder="例如：com.apple.Terminal"></textarea>
+        <p id="exclusions-hint" class="hint">每行填写一个程序名或 bundle id，按不区分大小写的子字符串匹配（包含即排除）。最多 200 项，每行最多 128 个字符；保存时转为小写、去除首尾空白和重复项，不允许控制字符、路径或通配符（/、\、*、?）。</p>
+        <p id="exclusions-error" class="error" role="alert" hidden></p>
+      </section>
+
+      <section aria-labelledby="diagnostics-title">
+        <h2 id="diagnostics-title">诊断</h2>
+        <div class="setting-row">
+          <label class="option" for="diagnostics">
+            <input id="diagnostics" type="checkbox" disabled aria-describedby="diagnostics-hint">
+            <span>启用诊断日志</span>
+          </label>
+          <button id="open-logs" type="button">打开日志文件夹</button>
+        </div>
+        <p id="diagnostics-hint" class="hint">默认关闭，仅在排查问题时开启。更改后需保存。</p>
+      </section>
+    </form>
+
+    <section aria-labelledby="about-title">
+      <h2 id="about-title">关于</h2>
+      <div class="setting-row">
+        <p class="version">Copick <span id="version">版本读取中…</span></p>
+        <button id="quit" type="button">退出 Copick</button>
+      </div>
+      <p class="hint">关闭此窗口后，Copick 仍在系统托盘常驻。要停止运行，请选择「退出 Copick」。</p>
+      <p id="app-message" class="hint" role="status" hidden></p>
+      <p id="app-error" class="error" role="alert" hidden></p>
+    </section>
+
+    <footer class="save-bar">
+      <div class="save-feedback">
+        <p id="settings-message" role="status">正在加载设置…</p>
+        <p id="settings-action-error" class="error" role="alert" hidden></p>
+      </div>
+      <div class="actions">
+        <button id="reload-settings" type="button" hidden>重新加载</button>
+        <button id="revert" type="button" disabled>撤销更改</button>
+        <button id="save" type="submit" form="settings-form" class="primary" disabled>保存设置</button>
+      </div>
+    </footer>
+  </main>
+  <script src="settings-model.js"></script>
+  <script src="control.js"></script>
+</body>
+</html>

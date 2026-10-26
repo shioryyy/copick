@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["SimpChinese"]
+      }
+    }
+  }
+}

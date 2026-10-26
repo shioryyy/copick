@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Copick Tauri",
+  "version": "0.1.0",
+  "identifier": "local.copick.tauri",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "control",
+        "title": "Copick 设置",
+        "url": "index.html",
+        "width": 620,
+        "height": 720,
+        "minWidth": 480,
+        "minHeight": 480,
+        "visible": false,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "category": "Utility",
+    "shortDescription": "划词后点击复制，保持来源应用焦点",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"], "displayLanguageSelector": false }
+    },
+    "resources": ["NOTICE-selection-hook.txt"],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}
