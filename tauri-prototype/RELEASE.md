@@ -55,7 +55,7 @@ CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 Z
 
 ### CI 签名管线
 
-签名与 Electron 版共用同一组仓库 secrets，全部缺失时行为与以前完全一致（macOS ad-hoc、Windows 未签名），不会半途失败：
+签名与 Electron 版共用同一组仓库 secrets，全部缺失时行为与以前完全一致（macOS ad-hoc、Windows 未签名），不会半途失败。**截至 2026-10-26 仓库尚未配置任何签名 secret**，CI 只跑过「缺密钥」分支；证书导入、`signtool` 签名与公证的代码路径仍未真实执行。
 
 | Secret | 平台 | 作用 |
 | --- | --- | --- |

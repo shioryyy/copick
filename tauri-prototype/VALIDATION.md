@@ -159,9 +159,31 @@ Tauri 附件默认只留在 Actions 产物里。仓库变量 `COPICK_PUBLISH_TAU
 
 `js-yaml` 能解析三个工作流；`npx @action-validator/cli` 对 `ci.yml`、`release.yml`、`tauri.yml` 均返回 0（仅提示 glob 路径不校验）。RELEASE.md 补充了 secrets 表、签名顺序与 `COPICK_PUBLISH_TAURI` 的说明。
 
-### 未完成：真实 Actions 运行
+### 真实 Actions 运行（PR #6）
 
-`workflow_dispatch` 只列出默认分支上已存在的工作流，而 `main` 还没有 `.github/workflows/tauri.yml`；本机也没有 GitHub token（未安装 `gh`、无 `GH_TOKEN`），无法开出 PR 来触发 `pull_request`。因此本轮**没有**在真实 GitHub Actions 上跑过任何一次，签名路径也只有静态审查、没有任何一次真实签名或公证。合并到 `main` 或打开 PR 之后应立即补跑，并核对 job summary 里的签名状态与产物哈希。
+`workflow_dispatch` 要求工作流已存在于默认分支，而 `main` 上还没有 `tauri.yml`，所以改用 PR 的 `pull_request` 触发（[PR #6](https://github.com/shioryyy/copick/pull/6)）。
+
+第一次运行 `Tauri Windows x64 MSVC` 在 `Test Tauri` 失败，而本机与 OMEN 都通过：`test/windows-guardian-version.test.cjs` 用 `source.indexOf('\n    }\n')` 定位每个方法，Git 在 Windows runner 上把 `.cs` 检出成 CRLF，标记匹配不到，6 条断言报 `must be a complete method`。改为先把源码统一成 LF，并用一份 CRLF 副本复跑确认修复有效。这是本次唯一一处「只在 CI 上失败」的问题，也说明本地双平台通过不能替代真实 runner。
+
+第二次运行全绿：
+
+| 作业 | 结果 | 耗时 |
+|---|---|---|
+| Tauri macOS arm64 | ✅ | 6m10s |
+| Tauri Windows x64 MSVC | ✅ | 8m35s |
+| macOS arm64（Electron） | ✅ | 1m7s |
+| Windows x64（Electron） | ✅ | 5m25s |
+| Dependency audit | ✅ | 15s |
+
+两平台都完成了真实构建、`--smoke-test`（`{"ok":true,"permission":true}`）与打包，产物已上传：
+
+```
+5932a4f1…  Copick-Tauri-0.1.0-mac-arm64.zip
+bb50a522…  Copick-Tauri-0.1.0-win-x64.zip
+25414584…  Copick-Tauri-Setup-0.1.0-win-x64.exe
+```
+
+**签名仍未真实验证。** 仓库里没有 `MAC_CSC_LINK` / `WIN_CSC_LINK` 等 secrets，两步都走了「缺密钥」分支并如实写进 job summary（`Windows: no WIN_CSC_LINK secret; artifacts are unsigned.`）。也就是说：签名步骤的代码路径在真实 runner 上跑过了，但只跑了空密钥分支；真正的证书导入、`signtool` 签名与公证从未执行过。要验证必须先在仓库配置对应 secrets 再重跑。
 
 ## 真机兼容矩阵（2026-10-26）
 
