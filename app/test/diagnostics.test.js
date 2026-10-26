@@ -42,6 +42,7 @@ test('visible background settings do not drop selections; focused settings have 
     settings = { isDestroyed: () => false, isVisible: () => true, isFocused: () => false };
     var events = []; diagnostics = { log: (event, metadata) => events.push([event, metadata]) };
     var data = { text: 'private selection', programName: 'notepad.exe', posLevel: 0 };
+    foreground = () => ({ program: 'notepad.exe', pid: 100 });
     var passedGate = false; pointInDip = () => { passedGate = true; return null; };`);
   // No Electron screen here: reaching the coordinate stage proves the settings gate passed.
   assert.throws(() => run('showSelection(data)'), /getCursorScreenPoint/);

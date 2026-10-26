@@ -1,0 +1,19 @@
+{
+  "name": "copick-tauri-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/tauri.cjs dev",
+    "build": "node scripts/tauri.cjs build",
+    "package": "node scripts/package.cjs",
+    "check": "node scripts/tauri.cjs check",
+    "test": "node --test test/*.test.cjs && node scripts/tauri.cjs test",
+    "verify:mac": "node scripts/verify-macos.cjs",
+    "verify:mac-copy-gate": "node scripts/verify-macos-copy-gate.cjs",
+    "verify:mac-guardian": "node scripts/verify-macos-guardian.cjs",
+    "verify:mac-first-frame": "node scripts/verify-macos-first-frame.cjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

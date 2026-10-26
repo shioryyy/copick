@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "设置页订阅主进程事件（close-blocked / settings-changed）所需的核心权限。",
+  "windows": ["control"],
+  "permissions": ["core:event:default"]
+}

@@ -1,0 +1,24 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const { prepareReport, readReport } = require('./verification-report.cjs');
+assert.equal(process.platform, 'darwin', 'Requires macOS');
+require('./macos-desktop.cjs').requireUnlockedDesktop();
+const root = path.resolve(__dirname, '..');
+const folder = path.join(root, 'artifacts', process.argv[2] || `clipboard-guardian-${Date.now()}`);
+fs.mkdirSync(folder, { recursive: true });
+const executable = path.join(folder, 'guardian-verification');
+const compile = spawnSync('clang++', ['-std=c++17', '-fno-objc-arc', '-fblocks', path.join(__dirname, 'verify-macos-guardian.mm'), '-framework', 'Cocoa', '-o', executable], { encoding: 'utf8' });
+assert.ifError(compile.error);
+assert.equal(compile.status, 0, compile.stderr);
+const reportPath = path.join(folder, 'verification.json');
+prepareReport(reportPath);
+// 备份持有者自行完成清理，runner 不对它施加强杀超时。
+const result = spawnSync(executable, [folder], { stdio: 'inherit' });
+assert.ifError(result.error);
+const report = readReport(reportPath, 'clipboard-guardian', result.status, result.pid);
+assert.equal(report.passed, true);
+assert.equal(report.testClipboardRestored, true);
+console.log(JSON.stringify(report, null, 2));

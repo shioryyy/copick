@@ -11,11 +11,11 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 // Run the real main-process handlers with fake Electron/native boundaries: no desktop hooks.
 async function harness({ platform = 'darwin', granted = true, paused = false, loadedError = null,
-  launchAtLogin = false, packaged = true, login = {}, diagnostics = false } = {}) {
+  launchAtLogin = false, packaged = true, login = {}, diagnostics = false, autoReady = true } = {}) {
   const policyContext = { module: { exports: {} }, process: { platform } };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'policy.js'), 'utf8'), policyContext);
   const policy = policyContext.module.exports;
-  const calls = { stop: 0, start: [], writes: [], workspaces: [] };
+  const calls = { stop: 0, start: [], writes: [], workspaces: [], dialogChoice: 0 };
   // Fake executable paths; the login item code only compares them as strings.
   const execPath = platform === 'win32' ? 'C:/Copick/Copick.exe' : '/Applications/Copick.app/Contents/MacOS/Copick';
   const loginCalls = [];
@@ -23,7 +23,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     path: login.path ?? execPath, status: login.status ?? null };
   const paths = { appData: '/fake', userData: '/fake/copick-app', logs: '/fake/copick-app/logs' };
   let persisted = { paused, clipboardFallback: false, launchAtLogin, blacklist: [] };
-  let saveFails = false, startFails = false;
+  let saveFails = false, startFails = false, foregroundFails = false;
+  let active = { program: platform === 'darwin' ? 'com.apple.textedit' : 'notepad.exe', pid: 100 };
   const handlers = new Map(), windows = [], intervals = [], timeouts = new Map();
   let timerId = 0;
   class Hook extends EventEmitter {
@@ -45,7 +46,12 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
       this.webContents = new EventEmitter();
       this.webContents.mainFrame = { url: require('node:url').pathToFileURL(path.join(root, options.title ? 'settings.html' : 'popup.html')).href };
       this.webContents.setWindowOpenHandler = () => {};
-      this.webContents.send = (...args) => { this.messages = this.messages || []; this.messages.push(args); };
+      this.webContents.send = (...args) => {
+        this.messages = this.messages || []; this.messages.push(args);
+        if (autoReady && args[0] === 'popup:selection') {
+          handlers.get('popup:ready')({ sender: this.webContents, senderFrame: this.webContents.mainFrame }, args[1]);
+        }
+      };
       windows.push(this);
     }
     isDestroyed() { return false; }
@@ -53,6 +59,7 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     isVisible() { return false; }
     hide() { this.hidden = true; }
     show() {} focus() {} loadFile() {}
+    close() { calls.settingsClose = (calls.settingsClose || 0) + 1; }
     showInactive() { this.hidden = false; calls.inactive = true; }
     moveTop() { calls.moveTop = (calls.moveTop || 0) + 1; }
     setAlwaysOnTop(...args) { calls.alwaysOnTop = args; }
@@ -69,7 +76,8 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     requestSingleInstanceLock: () => true, setName() {}, setAppUserModelId() {}, isPackaged: packaged,
     setPath(name, value) { paths[name] = value; },
     setAppLogsPath() { paths.logs = path.join(paths.userData, 'logs'); calls.logsPath = paths.logs; },
-    whenReady: () => Promise.resolve(), getPath: name => paths[name], quit() {}, exit() {}, getVersion: () => 'test',
+    whenReady: () => Promise.resolve(), getPath: name => paths[name],
+    quit() { calls.quit = (calls.quit || 0) + 1; }, exit() {}, getVersion: () => 'test',
     dock: { setIcon: value => { calls.dockIcon = value; },
       show: () => new Promise(resolve => { calls.finishDockShow = () => { calls.dockIcon = 'Electron'; resolve(); }; }),
       hide() {} },
@@ -101,9 +109,10 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     screen: { getCursorScreenPoint: () => ({ x: 20, y: 20 }),
       getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1000, height: 1000 } }) },
     nativeImage: { createFromPath: () => ({ resize() { return this; }, setTemplateImage() {} }) },
-    dialog: { showErrorBox: (...args) => { throw new Error(args.join(' ')); } },
+    dialog: { showErrorBox: (...args) => { throw new Error(args.join(' ')); },
+      showMessageBoxSync: (_window, options) => { calls.closeDialog = options; return calls.dialogChoice; } },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } },
-    shell: { openExternal() {} } };
+    shell: { openExternal() {}, openPath: async value => { calls.openPath = value; return ''; } } };
   const context = { __dirname: root, console, process: { platform, argv: [], arch: 'arm64', versions: {}, execPath },
     setTimeout: (fn, delay) => { const id = ++timerId; timeouts.set(id, { fn, delay }); return id; },
     clearTimeout: id => timeouts.delete(id),
@@ -111,6 +120,9 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
     require: name => name === 'electron' ? electron : name === 'selection-hook' ? Hook : name === './policy' ? policy :
       name === './config' ? { loadConfig: file => { calls.configPath = file; return { config: persisted, error: loadedError }; },
         saveConfig: (_file, value) => { if (saveFails) throw new Error('disk full'); persisted = policy.validateConfig(value); return persisted; } } :
+      name === './program-names' ? require('../src/program-names') :
+      name === './foreground' ? { sameApplication: require('../src/foreground').sameApplication,
+        readForeground: () => { if (foregroundFails) throw new Error('query failed'); return active; } } :
       name === './diagnostics' ? { diagnosticsEnabled: () => diagnostics, errorMetadata: () => ({}),
         createDiagnostics: () => ({ log: (event, metadata) => {
           calls.diagnostics = calls.diagnostics || []; calls.diagnostics.push([event, metadata]);
@@ -118,13 +130,14 @@ async function harness({ platform = 'darwin', granted = true, paused = false, lo
   vm.runInNewContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context);
   await Promise.resolve();
   function invoke(name, value) {
-    const window = windows.find(item => Boolean(item.options.title) === name.startsWith('settings:'));
+    const window = windows.findLast(item => Boolean(item.options.title) === name.startsWith('settings:'));
     return handlers.get(name)({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, value);
   }
-  function open() { Tray.instance.menu.find(item => item.label === '设置与应用黑名单…').click(); }
+  function open() { Tray.instance.menu.find(item => item.label === '设置…').click(); }
   return { calls, windows, policy, app, hook: Hook.instance, tray: Tray.instance, invoke, open,
     loginCalls, loginState, execPath, timeouts,
     get persisted() { return persisted; }, grant(value) { granted = value; },
+    foreground(value) { active = value; }, failForeground() { foregroundFails = true; },
     failSave() { saveFails = true; }, failStart() { startFails = true; }, tick() { intervals.forEach(fn => fn()); },
     setLoginItem(value) { Object.assign(loginState, value); } };
 }
@@ -233,6 +246,56 @@ test('successful popup copy shows feedback before hiding and rejects duplicate c
   assert.equal(popup.hidden, true);
 });
 
+test('新选区等待页面准备才显示，旧 token 和重复确认无法唤起浮窗', async () => {
+  const h = await harness({ autoReady: false });
+  const popup = h.windows[0];
+  popup.webContents.emit('did-finish-load');
+  const select = text => {
+    h.hook.emit('text-selection', { text, programName: 'com.apple.TextEdit',
+      mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+    return popup.messages.at(-1)[1];
+  };
+  const first = select('first');
+  assert.equal(popup.hidden, true);
+  assert.equal(h.calls.moveTop, undefined);
+  assert.equal(h.invoke('popup:copy', first), false);
+  assert.equal(h.invoke('popup:ready', first), true);
+  assert.equal(popup.hidden, false);
+  assert.equal(h.invoke('popup:copy', first), true);
+  const second = select('second');
+  assert.equal(popup.hidden, true);
+  assert.equal(h.invoke('popup:ready', first), false);
+  assert.equal(popup.hidden, true);
+  assert.equal(h.invoke('popup:ready', second), true);
+  assert.equal(h.invoke('popup:ready', second), false);
+  assert.equal(h.calls.moveTop, 2);
+  const third = select('third');
+  h.hook.emit('key-down');
+  assert.equal(h.invoke('popup:ready', third), false);
+  assert.equal(popup.hidden, true);
+  const fourth = select('fourth');
+  h.foreground({ program: 'com.example.other', pid: 200 });
+  assert.equal(h.invoke('popup:ready', fourth), false);
+  assert.equal(popup.hidden, true);
+  assert.deepEqual(h.calls.writes, ['first']);
+});
+
+test('popup ready 确认拒绝错误页面及已超时的选区', async () => {
+  const h = await harness({ autoReady: false });
+  const popup = h.windows[0];
+  popup.webContents.emit('did-finish-load');
+  h.hook.emit('text-selection', { text: 'sample', programName: 'com.apple.TextEdit',
+    mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+  const token = popup.messages.at(-1)[1];
+  const url = popup.webContents.mainFrame.url;
+  popup.webContents.mainFrame.url = url.replace('popup.html', 'settings.html');
+  assert.equal(h.invoke('popup:ready', token), false);
+  popup.webContents.mainFrame.url = url;
+  [...h.timeouts.values()].forEach(timer => timer.fn());
+  assert.equal(h.invoke('popup:ready', token), false);
+  assert.equal(popup.hidden, true);
+});
+
 test('old feedback timer cannot hide a new selection', async () => {
   const h = await harness();
   const popup = h.windows[0];
@@ -287,17 +350,66 @@ test('Windows does not try to configure a Dock icon', async () => {
   assert.equal(h.calls.dockIcon, undefined);
 });
 
-test('popup activation does not open settings; Dock activation without windows does', async () => {
+test('应用激活只恢复已有设置窗口，不创建新窗口', async () => {
+  const h = await harness();
+  h.app.emit('activate', {}, false);
+  assert.equal(h.windows.length, 1);
+  h.open();
+  const settings = h.windows[1];
+  let shown = 0;
+  settings.show = () => { shown++; };
+  h.app.emit('activate', {}, false);
+  assert.equal(shown, 1);
+  assert.equal(h.windows.length, 2);
+});
+
+test('复制成功并隐藏后到达的激活事件不会打开设置，托盘仍可打开', async () => {
   const h = await harness();
   const popup = h.windows[0];
-  popup.isVisible = () => true;
+  popup.webContents.emit('did-finish-load');
+  h.hook.emit('text-selection', { text: 'sample', programName: 'com.apple.TextEdit',
+    mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+  h.app.emit('activate', {}, false);
+  assert.equal(h.windows.length, 1);
+  assert.equal(h.invoke('popup:copy', popup.messages.at(-1)[1]), true);
   h.app.emit('activate', {}, true);
   assert.equal(h.windows.length, 1);
-  h.app.emit('activate', {}, false);
+  [...h.timeouts.values()].forEach(timer => timer.fn());
+  assert.equal(popup.hidden, true);
+  for (const visible of [false, true, false]) h.app.emit('activate', {}, visible);
   assert.equal(h.windows.length, 1);
-  popup.isVisible = () => false;
-  h.app.emit('activate', {}, false);
+  h.open();
   assert.equal(h.windows.length, 2);
+});
+
+test('浮窗超时或被键鼠关闭后的激活事件不会创建设置窗口', async () => {
+  for (const dismiss of ['timeout', 'key-down', 'mouse-wheel', 'mouse-down']) {
+    const h = await harness();
+    const popup = h.windows[0];
+    popup.webContents.emit('did-finish-load');
+    h.hook.emit('text-selection', { text: 'sample', programName: 'com.apple.TextEdit',
+      mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+    if (dismiss === 'timeout') [...h.timeouts.values()].forEach(timer => timer.fn());
+    else h.hook.emit(dismiss, { x: 900, y: 900 });
+    assert.equal(popup.hidden, true);
+    h.app.emit('activate', {}, false);
+    assert.equal(h.windows.length, 1, dismiss);
+  }
+});
+
+test('浮窗交互不会唤起已有设置窗口，重新启动应用仍可打开设置', async () => {
+  const h = await harness();
+  h.open();
+  const settings = h.windows[1];
+  let shown = 0;
+  settings.show = () => { shown++; };
+  const popup = h.windows[0];
+  popup.isVisible = () => true;
+  h.app.emit('activate', {}, false);
+  assert.equal(shown, 0);
+  popup.isVisible = () => false;
+  h.app.emit('second-instance');
+  assert.equal(shown, 1);
 });
 
 test('Windows heals a moved portable folder and reports the live Task Manager state', async () => {
@@ -437,6 +549,140 @@ test('popup IPC diagnostics reject the wrong page and record copied after the fe
   assert.equal(popup.hidden, true);
   assert.ok(h.calls.diagnostics.some(([event, metadata]) => event === 'popup-hidden' && metadata.reason === 'copied'));
   assert.equal(JSON.stringify(h.calls.diagnostics).includes('private selection'), false);
+});
+
+test('托盘保留常用操作，帮助入口可打开设置并请求展开排查', async () => {
+  const h = await harness();
+  assert.deepEqual(plain(h.tray.menu.filter(item => item.type !== 'separator').map(item => item.label)),
+    ['Copick · 运行中', '暂停划词', '在最近取词应用中停用', '设置…', '帮助与诊断', '退出 Copick']);
+  const help = h.tray.menu.find(item => item.label === '帮助与诊断').submenu;
+  help.find(item => item.label === '没有出现复制按钮？').click();
+  assert.equal(h.windows.length, 2);
+  assert.equal(h.invoke('settings:read').helpRequest, 1);
+  h.windows[0].webContents.emit('did-finish-load');
+  h.foreground({ program: 'com.apple.safari', pid: 200 });
+  h.hook.emit('text-selection', { text: 'sample', programName: 'com.apple.Safari',
+    mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+  const exclude = h.tray.menu.find(item => item.label === '在此应用中停用：Safari');
+  assert.ok(exclude.enabled);
+  exclude.click();
+  assert.deepEqual(plain(h.persisted.blacklist), ['com.apple.safari']);
+  h.windows[1].emit('closed');
+  h.open();
+  assert.equal(h.invoke('settings:read').helpRequest, 0);
+});
+
+test('诊断开关即时生效且不写配置，关闭后拒绝打开日志目录', async () => {
+  const h = await harness(); h.open();
+  const original = h.persisted;
+  assert.equal(h.invoke('settings:read').diagnosticsEnabled, false);
+  await assert.rejects(h.invoke('settings:open-logs'), /先开启/);
+  assert.throws(() => h.invoke('settings:diagnostics', 'true'), /Invalid request/);
+  assert.equal(h.invoke('settings:diagnostics', true).diagnosticsEnabled, true);
+  assert.equal(h.persisted, original);
+  assert.ok(h.calls.diagnostics.some(([event]) => event === 'diagnostics-enabled'));
+  h.hook.emit('mouse-up'); h.tick();
+  assert.ok(h.calls.diagnostics.some(([event, metadata]) => event === 'heartbeat' && metadata.mouseUp === 1));
+  assert.equal(await h.invoke('settings:open-logs'), true);
+  assert.equal(h.calls.openPath, h.app.getPath('logs'));
+  const settings = h.windows[1];
+  const href = settings.webContents.mainFrame.url;
+  settings.webContents.mainFrame.url = href.replace('settings.html', 'popup.html');
+  assert.throws(() => h.invoke('settings:diagnostics', false), /Invalid request/);
+  await assert.rejects(h.invoke('settings:open-logs'), /Invalid sender/);
+  settings.webContents.mainFrame.url = href;
+  assert.equal(h.invoke('settings:diagnostics', false).diagnosticsEnabled, false);
+  const count = h.calls.diagnostics.length;
+  h.hook.emit('mouse-up'); h.tick();
+  assert.equal(h.calls.diagnostics.length, count);
+  await assert.rejects(h.invoke('settings:open-logs'), /先开启/);
+});
+
+test('未保存关闭默认保留编辑，明确放弃才允许卸载页面', async () => {
+  const h = await harness(); h.open();
+  const settings = h.windows[1];
+  let allowed = false;
+  const event = { preventDefault() { allowed = true; } };
+  settings.webContents.emit('will-prevent-unload', event);
+  assert.equal(allowed, false);
+  assert.equal(h.calls.closeDialog.defaultId, 0);
+  assert.equal(h.calls.closeDialog.cancelId, 0);
+  h.calls.dialogChoice = 1;
+  settings.webContents.emit('will-prevent-unload', event);
+  assert.equal(allowed, true);
+});
+
+test('退出先关闭设置，取消后保留浮窗，再次退出仍可确认', async () => {
+  const h = await harness(); h.open();
+  const settings = h.windows[1];
+  let prevented = 0;
+  const event = { preventDefault() { prevented++; } };
+  h.app.emit('before-quit', event);
+  assert.equal(prevented, 1);
+  assert.equal(h.calls.settingsClose, 1);
+  assert.equal(h.windows.length, 2);
+  settings.webContents.emit('will-prevent-unload', event);
+  assert.equal(prevented, 1);
+  h.app.emit('before-quit', event);
+  assert.equal(h.calls.settingsClose, 2);
+  h.calls.dialogChoice = 1;
+  settings.webContents.emit('will-prevent-unload', event);
+  settings.emit('closed');
+  assert.equal(h.calls.quit, 1);
+});
+
+test('前台应用变化、同名不同进程及查询失败均拒绝复制并销毁旧 token', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    for (const changed of [
+      { program: platform === 'darwin' ? 'com.example.other' : 'other.exe', pid: 200 },
+      { program: platform === 'darwin' ? 'com.apple.textedit' : 'notepad.exe', pid: 200 },
+      null, 'error'
+    ]) {
+      const h = await harness({ platform, diagnostics: true });
+      const popup = h.windows[0];
+      popup.webContents.emit('did-finish-load');
+      const program = platform === 'darwin' ? 'com.apple.TextEdit' : 'notepad.exe';
+      h.hook.emit('text-selection', { text: 'private selection', programName: program,
+        mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+      const token = popup.messages.at(-1)[1];
+      if (changed === 'error') h.failForeground(); else h.foreground(changed);
+      assert.equal(h.invoke('popup:copy', token), false);
+      assert.equal(popup.hidden, true);
+      assert.deepEqual(h.calls.writes, []);
+      h.foreground({ program: program.toLowerCase(), pid: 100 });
+      assert.equal(h.invoke('popup:copy', token), false);
+      assert.equal(JSON.stringify(h.calls.diagnostics).includes('private selection'), false);
+      assert.equal(JSON.stringify(h.calls.diagnostics).includes(program), false);
+    }
+  }
+});
+
+test('轮询发现前台切换后清除旧选区，切回来源也无法复用', async () => {
+  const h = await harness();
+  const popup = h.windows[0];
+  popup.webContents.emit('did-finish-load');
+  h.hook.emit('text-selection', { text: 'sample', programName: 'com.apple.TextEdit',
+    mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+  const token = popup.messages.at(-1)[1];
+  h.foreground({ program: 'com.example.other', pid: 200 });
+  h.tick();
+  assert.equal(popup.hidden, true);
+  h.foreground({ program: 'com.apple.textedit', pid: 100 });
+  assert.equal(h.invoke('popup:copy', token), false);
+  assert.deepEqual(h.calls.writes, []);
+});
+
+test('迟到的其他应用选区和未知前台来源不会显示浮窗', async () => {
+  for (const active of [null, { program: 'com.example.other', pid: 200 }]) {
+    const h = await harness();
+    const popup = h.windows[0];
+    popup.webContents.emit('did-finish-load');
+    h.foreground(active);
+    h.hook.emit('text-selection', { text: 'sample', programName: 'com.apple.TextEdit',
+      mousePosEnd: { x: 20, y: 20 }, posLevel: 0 });
+    assert.equal(h.calls.inactive, undefined);
+    assert.deepEqual(h.calls.writes, []);
+  }
 });
 
 test('config files written before launchAtLogin existed still load with it off', async () => {
