@@ -57,6 +57,8 @@ struct Selection {
     double x;
     double y;
     int method;
+    // 小写程序标识（UTF-8）。只用于托盘文案与排除项，指针在回调返回前有效。
+    const char *program;
 };
 using InputCallback = void (*)(InputEvent);
 using CaptureCallback = void (*)(uint64_t, const Selection *);
@@ -83,6 +85,7 @@ struct Request {
     std::wstring copyText;
     TextSelectionInfo selection;
     std::string utf8;
+    std::string program;
     DWORD endingSequence = 0;
     std::atomic<bool> cancel{false};
     copick::OperationGate gate;
@@ -263,9 +266,10 @@ void WorkerMain(const std::shared_ptr<Worker> &worker) {
                 if (request->selection.posLevel >= SelectionPositionLevel::Full) {
                     x = request->selection.endBottom.x; y = request->selection.endBottom.y;
                 }
+                if (ok) ToUtf8(request->selection.programName, request->program);
                 Selection selection = {request->utf8.data(), request->utf8.size(),
                     static_cast<int>(request->source.pid), reinterpret_cast<uint64_t>(request->source.hwnd),
-                    x, y, static_cast<int>(request->selection.method)};
+                    x, y, static_cast<int>(request->selection.method), request->program.c_str()};
                 request->captureCallback(request->id, ok ? &selection : nullptr);
             }
             { std::lock_guard<std::mutex> lock(worker->mutex); worker->active.reset(); }
@@ -406,6 +410,13 @@ extern "C" bool cp_permission(bool) { return true; }
 extern "C" void cp_open_settings() {}
 extern "C" bool cp_snapshot_popup(const char *) { return false; }
 extern "C" int cp_front_pid() { return static_cast<int>(WindowPid(GetForegroundWindow())); }
+// 物理像素坐标，与 UIA 的 endBottom 及输入事件使用同一空间。
+extern "C" bool cp_cursor_position(double *x, double *y) {
+    POINT point;
+    if (!x || !y || !GetCursorPos(&point)) return false;
+    *x = point.x; *y = point.y;
+    return true;
+}
 extern "C" bool cp_start(InputCallback callback) {
     if (!OnMainThread() || !callback || State().disabled) return false;
     Bridge &state = State(); if (state.hooks && state.hooks->listening.load()) return true;

@@ -2,12 +2,13 @@
 
 mod config;
 mod diagnostics;
+mod program_names;
 mod startup;
 
 use serde::Serialize;
-use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder};
-use std::{ffi::{c_char, c_void, CString}, sync::{atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering}, mpsc, Arc, Mutex, OnceLock}, time::{Duration, Instant}};
-use tauri::{LogicalSize, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem}, tray::TrayIconBuilder};
+use std::{ffi::{c_char, c_void, CStr, CString}, sync::{atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering}, mpsc, Arc, Mutex, OnceLock}, time::{Duration, Instant}};
+use tauri::{Emitter, LogicalSize, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 macro_rules! trace {
     ($($arg:tt)*) => {{
@@ -56,6 +57,8 @@ struct NativeSelection {
     x: f64,
     y: f64,
     method: i32,
+    /// 小写程序标识（Windows 可执行文件名或 macOS bundle id），NUL 结尾。
+    program: *const c_char,
 }
 extern "C" {
     fn cp_permission(prompt: bool) -> bool;
@@ -72,6 +75,7 @@ extern "C" {
     fn cp_configure_popup(window: *mut c_void);
     fn cp_hide_popup();
     fn cp_snapshot_popup(path: *const c_char) -> bool;
+    fn cp_cursor_position(x: *mut f64, y: *mut f64) -> bool;
     #[cfg(target_os = "macos")]
     fn cp_snapshot_control(window: *mut c_void, path: *const c_char) -> bool;
     #[cfg(target_os = "macos")]
@@ -109,7 +113,7 @@ extern "C" fn input(event: InputEvent) {
     }
 }
 
-struct Captured { text: String, pid: i32, window: u64, x: f64, y: f64, method: i32 }
+struct Captured { text: String, pid: i32, window: u64, x: f64, y: f64, method: i32, program: String }
 enum Completion {
     // arrived 是回执到达回调线程的时刻，不是主线程处理它的时刻。主线程
     // 可能因为别的工作晚到几十毫秒，不能把“已经收到的成功”当成超时丢弃。
@@ -124,9 +128,13 @@ extern "C" fn capture_complete(request_id: u64, value: *const NativeSelection) {
             if value.text.is_null() || value.length == 0 || value.length > 1024 * 1024 { None }
             else {
                 let bytes = std::slice::from_raw_parts(value.text.cast::<u8>(), value.length);
+                // 程序标识只用于托盘文案与排除项，缺失时按空字符串处理；
+                // 原生侧保证指针在本回调返回前有效。
+                let program = if value.program.is_null() { String::new() }
+                    else { CStr::from_ptr(value.program).to_string_lossy().into_owned() };
                 std::str::from_utf8(bytes).ok().map(|text| Captured {
                     text: text.to_owned(), pid: value.pid, window: value.window,
-                    x: value.x, y: value.y, method: value.method,
+                    x: value.x, y: value.y, method: value.method, program,
                 })
             }
         }
@@ -177,6 +185,12 @@ struct State {
     capture: Option<CaptureFlight>, copy: Option<CopyFlight>, armed: Option<InputEvent>, generation: u64, next_request: u64, input_epoch: u64,
     last_permission_check: Option<Instant>, error: Option<String>,
     tray_status: String,
+    /// 最近一次成功取词的程序标识，供托盘「在此应用中停用」使用。
+    last_program: String,
+    /// 当前生效的用户排除列表，托盘据此判断该程序是否已停用。
+    excluded: Vec<String>,
+    /// 设置页有未保存草稿或正在保存时为 true，关闭窗口前需要确认。
+    draft_dirty: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,16 +267,32 @@ fn next_request(state: &mut State) -> u64 {
     state.next_request = state.next_request.wrapping_add(1).max(1);
     state.next_request
 }
+/// 与 Electron 版一致的丢弃阈值（DIP/物理像素由各平台自行保证）。
+const MAX_CURSOR_DISTANCE: f64 = 100.0;
+fn cursor_exceeded(origin: (f64, f64), cursor: (f64, f64)) -> bool {
+    (origin.0 - cursor.0).hypot(origin.1 - cursor.1) > MAX_CURSOR_DISTANCE
+}
+/// 指针是否已离开取词起点超过阈值。读不到指针位置时不丢弃结果。
+fn cursor_far_from(x: f64, y: f64) -> bool {
+    let (mut cursor_x, mut cursor_y) = (0.0, 0.0);
+    (unsafe { cp_cursor_position(&mut cursor_x, &mut cursor_y) }) && cursor_exceeded((x, y), (cursor_x, cursor_y))
+}
 fn accept_capture(app: &tauri::AppHandle, state: &mut State, request_id: u64, value: Option<Captured>, arrived: Instant) {
     let Some(flight) = state.capture.as_ref() else { return; };
     if !state.running || !flight.accepts(request_id, state.generation, arrived) { return; }
     if !unsafe { cp_source_matches(flight.source.source_pid, flight.source.source_window) } { invalidate(app, state, "capture_source_changed"); return; }
+    let release_point = (flight.source.x, flight.source.y);
     state.capture = None;
     let Some(value) = value else { trace!("COPICK_CAPTURE_EMPTY request={}", request_id); return; };
     if !unsafe { cp_source_matches(value.pid, value.window) } || value.text.trim().is_empty() { return; }
+    // 慢结果到达时指针可能已经离开选区；此时浮窗会弹在用户正在操作的位置。
+    // 与 Electron 版一致以鼠标松开点为基准，而不是选区末行（向上拖选时两者相距很远）。
+    if cursor_far_from(release_point.0, release_point.1) { invalidate(app, state, "cursor_moved"); return; }
     hide(app, state);
     state.serial = state.serial.wrapping_add(1);
     state.selections += 1;
+    state.last_program = value.program.clone();
+    update_tray(app, state);
     let token = uuid::Uuid::new_v4().to_string();
     let script = format!("window.copickSelection({});", serde_json::to_string(&token).unwrap());
     state.current = Some(Selection { value, token, expires: Instant::now() + Duration::from_secs(7), presented: false, copying: false, copied: false });
@@ -446,11 +476,13 @@ fn require(window: &WebviewWindow, label: &str) -> Result<(), String> {
         Err("不允许的窗口调用".into())
     }
 }
-fn apply_config(config: &config::Config) {
+fn apply_config(state: &mut State, config: &config::Config) {
     let names: Vec<_> = config.excluded_apps.iter().filter_map(|name| CString::new(name.as_str()).ok()).collect();
     let pointers: Vec<_> = names.iter().map(|name| name.as_ptr()).collect();
     unsafe { cp_set_excluded(pointers.as_ptr(), pointers.len()); }
     diagnostics::set_enabled(config.diagnostics_enabled);
+    // 托盘菜单需要判断最近应用是否已被排除；配置每次保存都整体替换。
+    state.excluded = config.excluded_apps.clone();
 }
 
 fn set_paused(app: &tauri::AppHandle, state: &mut State, paused: bool) -> Result<(), String> {
@@ -512,7 +544,7 @@ async fn save_settings(app: tauri::AppHandle, window: WebviewWindow, config: con
         store.save(config.clone())?;
         drop(store);
         state.fallback = config.clipboard_fallback;
-        apply_config(&config);
+        apply_config(state, &config);
         invalidate(app, state, "settings_changed");
         Ok::<_, String>(())
     }).await??;
@@ -539,11 +571,35 @@ fn open_logs(window: WebviewWindow) -> Result<(), String> {
     let result = std::process::Command::new("explorer.exe").arg(&path).spawn();
     result.map(|_| ()).map_err(|_| "无法打开日志目录。".into())
 }
+/// 退出前先让设置页处理未保存草稿；托盘与设置页共用这一入口。
+fn request_quit(app: &tauri::AppHandle) {
+    let dirty = app.state::<Mutex<State>>().lock().unwrap().draft_dirty;
+    if dirty {
+        show_settings(app);
+        let _ = app.emit_to("control", "close-blocked", ());
+    } else {
+        app.exit(0);
+    }
+}
 #[tauri::command]
 fn quit(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
     require(&window, "control")?;
-    app.exit(0);
+    request_quit(&app);
     Ok(())
+}
+/// 设置页把“有未保存草稿或正在保存”同步给主进程，关闭窗口与退出时据此确认。
+#[tauri::command]
+fn set_draft_dirty(app: tauri::AppHandle, window: WebviewWindow, dirty: bool) -> Result<(), String> {
+    require(&window, "control")?;
+    app.state::<Mutex<State>>().lock().unwrap().draft_dirty = dirty;
+    Ok(())
+}
+/// 用户确认放弃未保存草稿：清除标记并关闭（隐藏）设置窗口。
+#[tauri::command]
+fn close_settings(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    require(&window, "control")?;
+    app.state::<Mutex<State>>().lock().unwrap().draft_dirty = false;
+    window.hide().map_err(|error| error.to_string())
 }
 /// 屏幕可用逻辑尺寸小于窗口时返回收缩后的尺寸，留出十分之一余量。
 fn fitted_inner_size(width: f64, height: f64, monitor_width: f64, monitor_height: f64) -> Option<(f64, f64)> {
@@ -584,31 +640,72 @@ fn show_settings(app: &tauri::AppHandle) {
         }
     }
 }
-struct TrayItems { status: MenuItem<tauri::Wry>, pause: MenuItem<tauri::Wry> }
+struct TrayItems { status: MenuItem<tauri::Wry>, pause: MenuItem<tauri::Wry>, disable: MenuItem<tauri::Wry> }
 fn tray_labels(state: &State) -> (&'static str, &'static str) {
     let text = if !state.permission { "需要辅助功能权限" } else if state.paused { "已暂停" }
         else if state.error.is_some() { "监听异常，请打开设置" } else if state.running { "正在监听" } else { "正在启动" };
     (text, if state.paused { "恢复监听" } else { "暂停监听" })
 }
+/// 托盘「在此应用中停用」的文案与可用状态。
+///
+/// 受保护的终端/凭据程序由引擎在取词前拦截，因此这里只需判断用户排除列表；
+/// 程序名按引擎相同的子串规则匹配，未取过词时保持禁用。
+fn exclusion_label(state: &State) -> (String, bool) {
+    if state.last_program.is_empty() { return ("在最近取词应用中停用".into(), false); }
+    let program = state.last_program.to_lowercase();
+    let excluded = state.excluded.iter().any(|entry| program.contains(entry));
+    // Windows 菜单把 & 当作助记符，显示名称里的 & 需要转义。
+    let display = program_names::display_name(&state.last_program).replace('&', "&&");
+    (format!("在此应用中停用：{display}"), !excluded)
+}
 fn update_tray(app: &tauri::AppHandle, state: &mut State) {
     let (text, pause_text) = tray_labels(state);
-    // 缓存必须同时包含两个标签：缺少权限时状态文字与暂停状态无关，
+    let (exclude_text, exclude_enabled) = exclusion_label(state);
+    // 缓存必须同时包含全部标签与可用状态：缺少权限时状态文字与暂停状态无关，
     // 只比较状态文字会让暂停/恢复项停留在旧文案。
-    let cache = format!("{text}\n{pause_text}");
+    let cache = format!("{text}\n{pause_text}\n{exclude_text}\n{exclude_enabled}");
     if state.tray_status == cache { return; }
     state.tray_status = cache;
     if let Some(items) = app.try_state::<TrayItems>() {
         let _ = items.status.set_text(format!("Copick · {text}"));
         let _ = items.pause.set_text(pause_text);
+        let _ = items.disable.set_text(&exclude_text);
+        let _ = items.disable.set_enabled(exclude_enabled);
     }
     if let Some(tray) = app.tray_by_id("copick") { let _ = tray.set_tooltip(Some(format!("Copick · {text}"))); }
+}
+/// 把最近取词的程序追加到用户排除列表。
+///
+/// 与设置页保存共用 `Store::save` 的校验与持久化路径；保存成功后立即刷新引擎
+/// 过滤列表和托盘文案，保存失败则只记录错误，不改变当前配置。
+fn exclude_last_program(app: &tauri::AppHandle, state: &mut State) {
+    let program = state.last_program.trim().to_lowercase();
+    if program.is_empty() { return; }
+    let store = app.state::<Mutex<config::Store>>();
+    let mut store = store.lock().unwrap();
+    let mut next = store.config.clone();
+    next.excluded_apps.push(program);
+    match store.save(next) {
+        Ok(()) => {
+            let saved = store.config.clone();
+            drop(store);
+            apply_config(state, &saved);
+            invalidate(app, state, "settings_changed");
+            // 设置页可能正打开着：让它重新读取配置，未保存的草稿保持不动。
+            let _ = app.emit_to("control", "settings-changed", ());
+        }
+        Err(error) => state.error = Some(format!("无法保存排除列表：{error}")),
+    }
+    update_tray(app, state);
 }
 fn create_tray(app: &tauri::App) -> tauri::Result<()> {
     let status = MenuItem::with_id(app, "tray_status", "Copick · 正在启动", false, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "暂停监听", true, None::<&str>)?;
+    let disable = MenuItem::with_id(app, "disable_app", "在最近取词应用中停用", false, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出 Copick", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&status, &pause, &settings, &quit])?;
+    let menu = Menu::with_items(app, &[&status, &pause, &disable, &separator, &settings, &quit])?;
     #[cfg(target_os = "macos")]
     let icon = tauri::image::Image::from_bytes(include_bytes!("../../../app/assets/trayTemplate.png"))?;
     #[cfg(target_os = "windows")]
@@ -623,11 +720,16 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
                     let paused = !state.paused;
                     if let Err(error) = set_paused(app, &mut state, paused) { state.error = Some(error); show_settings(app); }
                 },
-                "quit" => app.exit(0),
+                "disable_app" => {
+                    let managed = app.state::<Mutex<State>>();
+                    let mut state = managed.lock().unwrap();
+                    exclude_last_program(app, &mut state);
+                },
+                "quit" => request_quit(app),
                 _ => {},
             }
         }).build(app)?;
-    app.manage(TrayItems { status, pause });
+    app.manage(TrayItems { status, pause, disable });
     Ok(())
 }
 
@@ -774,18 +876,18 @@ fn main() {
             }
         }))
         .manage(Mutex::new(State::default()))
-        .invoke_handler(tauri::generate_handler![status, configure, permission, settings, save_settings, set_startup, open_logs, quit, popup_state, present, copy_selection])
+        .invoke_handler(tauri::generate_handler![status, configure, permission, settings, save_settings, set_startup, open_logs, quit, set_draft_dirty, close_settings, popup_state, present, copy_selection])
         .setup(|app| {
             let directory = app.path().app_config_dir()?;
             let legacy = config::legacy_path();
             let store = config::Store::load(directory.join("config.json"), legacy.as_deref());
             diagnostics::init(directory.join("logs/selection.log"));
-            apply_config(&store.config);
             {
                 let managed = app.state::<Mutex<State>>();
                 let mut state = managed.lock().unwrap();
                 state.paused = store.config.paused;
                 state.fallback = store.config.clipboard_fallback;
+                apply_config(&mut state, &store.config);
             }
             let needs_settings = store.error.is_some() || !unsafe { cp_permission(false) };
             app.manage(Mutex::new(store));
@@ -827,9 +929,16 @@ fn main() {
             if window.label() == "control" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    let _ = window.hide();
-                    #[cfg(target_os = "macos")]
-                    let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    // 有未保存草稿时不能静默隐藏：设置页会显示确认条，
+                    // 用户选择放弃后才调用 close_settings。
+                    let dirty = window.app_handle().state::<Mutex<State>>().lock().unwrap().draft_dirty;
+                    if dirty {
+                        let _ = window.app_handle().emit_to("control", "close-blocked", ());
+                    } else {
+                        let _ = window.hide();
+                        #[cfg(target_os = "macos")]
+                        let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    }
                 }
             }
         })
@@ -850,6 +959,27 @@ mod tests {
         assert_eq!(tray_labels(&running), ("正在监听", "暂停监听"));
         let stopped = State { permission: true, error: Some("x".into()), ..State::default() };
         assert_eq!(tray_labels(&stopped).0, "监听异常，请打开设置");
+    }
+
+    #[test]
+    fn tray_exclusion_item_tracks_last_program_and_existing_entries() {
+        assert_eq!(exclusion_label(&State::default()), ("在最近取词应用中停用".into(), false));
+        let ready = State { last_program: "chrome.exe".into(), ..State::default() };
+        assert_eq!(exclusion_label(&ready), ("在此应用中停用：Chrome".into(), true));
+        // 与引擎一致：用户条目按子串匹配，命中后菜单项禁用。
+        let listed = State { last_program: "chrome.exe".into(), excluded: vec!["chrome".into()], ..State::default() };
+        assert_eq!(exclusion_label(&listed), ("在此应用中停用：Chrome".into(), false));
+        // 未收录的名称原样显示，Windows 助记符 & 必须转义。
+        let unknown = State { last_program: "a&b.exe".into(), ..State::default() };
+        assert_eq!(exclusion_label(&unknown), ("在此应用中停用：a&&b.exe".into(), true));
+    }
+
+    #[test]
+    fn cursor_distance_threshold_matches_electron() {
+        assert!(!cursor_exceeded((0.0, 0.0), (100.0, 0.0)));
+        assert!(cursor_exceeded((0.0, 0.0), (100.1, 0.0)));
+        assert!(!cursor_exceeded((0.0, 0.0), (60.0, 60.0)));
+        assert!(cursor_exceeded((0.0, 0.0), (80.0, 80.0)));
     }
 
     #[test]

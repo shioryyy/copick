@@ -142,6 +142,9 @@ class CopickFixture : Form {
     static void Up() { SendInput(1, new INPUT[] { Mouse(4) }, Marshal.SizeOf(typeof(INPUT))); }
     static void MouseClickAt(Point p, int count) {
         SetCursorPos(p.X, p.Y);
+        // 让窗口先处理 WM_SETCURSOR：产品在自动取词前用鼠标指针图标判断是否可能
+        // 位于文本上，紧接着点击可能仍读到箭头指针，导致回退被跳过。
+        Thread.Sleep(120);
         for (int i = 0; i < count; i++) { Down(); Thread.Sleep(35); Up(); Thread.Sleep(55); }
     }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibrary(string path);

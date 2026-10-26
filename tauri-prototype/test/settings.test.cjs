@@ -38,11 +38,18 @@ function harness(userAgent = 'Macintosh') {
       fire(name) { return listeners[name]({ preventDefault() {} }); }
     };
   }
-  const window = { CopickSettings: model, __TAURI__: { core: { invoke(command, args) {
-    const reply = deferred();
-    calls.push({ command, args, ...reply });
-    return reply.promise;
-  } } } };
+  const events = {};
+  const window = { CopickSettings: model, __TAURI__: {
+    core: { invoke(command, args) {
+      const reply = deferred();
+      calls.push({ command, args, ...reply });
+      return reply.promise;
+    } },
+    event: { listen(name, handler) {
+      (events[name] = events[name] || []).push(handler);
+      return Promise.resolve(() => {});
+    } }
+  } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/control.js'), 'utf8'), {
     window, document: { getElementById: id => elements[id] }, navigator: { userAgent },
     setInterval(callback, interval) { timers.push({ callback, interval }); }
@@ -51,6 +58,7 @@ function harness(userAgent = 'Macintosh') {
     elements, window, calls, timers,
     named: command => calls.filter(call => call.command === command),
     edit(text) { elements['excluded-apps'].value = text; elements['excluded-apps'].fire('input'); },
+    emit(name, payload) { for (const handler of events[name] || []) handler(payload); },
     poll() { return timers[0].callback(); }
   };
 }
@@ -296,6 +304,51 @@ test('日志命令的 void 响应不会作为状态渲染，退出错误可见�
   await quitting;
   assert.match(h.elements['app-error'].textContent, /退出受阻/);
   assert.equal(h.elements.quit.disabled, false);
+});
+test('草稿状态同步给主进程，保存后清除', async () => {
+  const h = harness();
+  await loaded(h);
+  assert.equal(h.named('set_draft_dirty').length, 0, '未改动时不发送');
+  h.edit('new');
+  assert.equal(h.named('set_draft_dirty').length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.named('set_draft_dirty')[0].args)), { dirty: true });
+  const saving = h.elements['settings-form'].fire('submit');
+  h.named('save_settings')[0].resolve(settings({ config: { version: 1, excludedApps: ['new'],
+    diagnosticsEnabled: false, clipboardFallback: false } }));
+  await saving;
+  assert.equal(h.named('set_draft_dirty').at(-1).args.dirty, false);
+});
+test('关闭被阻止时显示确认条，可继续编辑或放弃关闭', async () => {
+  const h = harness();
+  await loaded(h);
+  h.edit('new');
+  assert.equal(h.elements['close-warning'].hidden, true);
+  h.emit('close-blocked');
+  assert.equal(h.elements['close-warning'].hidden, false);
+  h.elements['close-continue'].fire('click');
+  assert.equal(h.elements['close-warning'].hidden, true);
+  h.emit('close-blocked');
+  const discarding = h.elements['close-discard'].fire('click');
+  assert.equal(h.named('close_settings').length, 1);
+  h.named('close_settings')[0].resolve(undefined);
+  await discarding;
+  assert.equal(h.elements['close-warning'].hidden, true);
+  assert.equal(h.elements['excluded-apps'].value, 'terminal', '放弃后回到已保存基线');
+  assert.equal(h.named('set_draft_dirty').at(-1).args.dirty, false);
+});
+test('托盘停用后重新读取基线，未保存草稿保持不变', async () => {
+  const h = harness();
+  await loaded(h);
+  h.edit('draft');
+  h.emit('settings-changed');
+  await flush();
+  h.named('settings')[1].resolve(settings({ config: { version: 1,
+    excludedApps: ['terminal', 'chrome.exe'], diagnosticsEnabled: false, clipboardFallback: false } }));
+  await flush();
+  await flush();
+  assert.equal(h.elements['excluded-apps'].value, 'draft', '不得覆盖未保存草稿');
+  h.elements.revert.fire('click');
+  assert.equal(h.elements['excluded-apps'].value, 'terminal\nchrome.exe', '撤销使用新基线');
 });
 test('Windows 保留检查监听状态按钮名称，macOS 保留权限与暂停按钮 ID', () => {
   const h = harness('Windows');

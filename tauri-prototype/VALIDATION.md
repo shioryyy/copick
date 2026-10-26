@@ -57,6 +57,45 @@ Electron 版 `clipboardFallback` 会在首次启动迁移时沿用；启动项�
 - 只验证了自绘 WinForms 控件这一条回退路径；Excel、PDF 阅读器、微信、资源管理器等真实应用仍待兼容矩阵复测。
 - macOS 回退保持关闭，本轮没有新增 macOS 端回退验证。
 
+## 托盘停用、草稿关闭确认与光标距离（2026-10-26）
+
+对齐 Electron 版第 4 步的四项能力，并补上真机验证。
+
+| 能力 | 实现 | 覆盖测试 |
+|---|---|---|
+| 托盘「最近应用停用」 | `exclusion_label()` 生成条目文案与启用态；`exclude_last_program` 写入配置后 `apply_config` + `invalidate("settings_changed")` + 广播 `settings-changed` | `tray_exclusion_item_tracks_last_program_and_existing_entries` |
+| 草稿关闭确认 | 设置页 `set_draft_dirty` 同步「有未保存更改或正在保存」；`CloseRequested` 只 `prevent_close` 并广播 `close-blocked`；托盘退出走同一 `request_quit` | `settings.test.cjs` 草稿同步、关闭确认、停用后重读基线 |
+| 程序名映射 | 新增 `src-tauri/src/program_names.rs`，与 Electron `program-names.js` 同表，Windows 进程名与 macOS bundle id 共用 | `known_identifiers_map_on_both_platforms`、`unknown_and_empty_values_are_returned_unchanged` |
+| 光标距离 | 两端 bridge 暴露 `cp_cursor_position`（Windows `GetCursorPos` 物理像素；macOS `CGEventCreate` 左上原点），松开位置与当前指针超过 `MAX_CURSOR_DISTANCE = 100` 时取消 | `cursor_distance_threshold_matches_electron`，取消原因 `cursor_moved` 进诊断 |
+
+### 关键缺陷：缺少 capability 导致事件订阅静默失效
+
+真机第一次运行 `scripts/verify-windows-settings.ps1` 的结果是「关闭确实被拦下，但确认条不出现」：
+
+```
+{"windowFound":true,"checkboxFound":true,"toggled":true,"blockedOnClose":true,
+ "warningShown":false,"discardFound":false,"hiddenAfterDiscard":false,"tree":"Copick · 设置 | … | 有未保存的更改。 | 撤销更改 | 保存设置 | …"}
+```
+
+原因是 Tauri 2 的核心命令受 ACL 控制，而项目此前没有 `src-tauri/capabilities/`，`core:event:allow-listen` 没有被授予，前端 `event.listen` 的 Promise 被拒绝。前端为了不让订阅失败打断页面加载，用了 `events.listen(...).catch(() => {})`，于是 `close-blocked` 与 `settings-changed` 两条链路在生产构建里全部失效，界面本身完全正常——只看 UI 无法发现。
+
+修复：新增 `src-tauri/capabilities/default.json`，把 `core:event:default` 授予 `control` 窗口。修复后同一驱动输出：
+
+```
+{"windowFound":true,"checkboxFound":true,"toggled":true,"blockedOnClose":true,
+ "warningShown":true,"discardFound":true,"hiddenAfterDiscard":true,"error":null}
+```
+
+`test/capabilities.test.cjs` 锁定这条约束（能力文件存在、覆盖 `control`、授予事件权限），并顺带断言源码包里没有 macOS 的 `._` 附属文件——否则 Windows 侧会多出一个 AppleDouble 文件。
+
+### 驱动实现说明
+
+`scripts/verify-windows-settings.cs` 用 UIA 驱动真实窗口：等 `diagnostics` 开关可用后切换，`PostMessage(WM_CLOSE)`，断言窗口仍可见，再等确认条与「放弃并关闭」并调用，最后断言窗口隐藏。元素优先按 `AutomationId` 查找——WebView2 把 DOM `id` 暴露成 AutomationId，`Name` 只在找不到时兜底；失败时会 dump 可见元素的名称，这次的 `tree` 字段就是靠它把问题从「事件没到」定位到「权限被拒」。
+
+自动检查：55 条 Node 测试（新增 3 条）、24 条 Rust 测试在两平台通过。
+
+**限制：** 只在 Windows 真机跑了关闭确认；托盘菜单的「停用最近应用」条目仍未人工点击验证（写入路径与 `settings-changed` 已由 Node 测试和同一事件通道覆盖）。macOS 侧 `close-blocked` 仍无真机验证。
+
 ## v0.1.0 产品化验收（2026-10-26）
 
 本轮针对完整产品行为（单实例、托盘、设置页、配置持久化、关闭常驻、开机启动、退出）在最终源码上重新 build 和 package。Windows 环境为 OMEN Windows 11 x64 build 26200、2560×1440、150% 缩放、已登录 console Session 2；所有桌面交互经普通权限 Interactive 计划任务执行，未绕过锁屏或权限。

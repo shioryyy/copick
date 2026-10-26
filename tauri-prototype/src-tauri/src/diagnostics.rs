@@ -57,7 +57,7 @@ fn cancel_reason(value: &str) -> bool {
         | "selection_expired" | "selection_source_changed" | "capture_timeout"
         | "mouse_down" | "input_cancelled" | "configure" | "settings_changed" | "popup_prepare_failed"
         | "present_not_running" | "present_source_changed" | "present_focus_lost"
-        | "present_not_shown" | "copy_source_changed")
+        | "present_not_shown" | "copy_source_changed" | "cursor_moved")
 }
 
 fn late_reason(value: &str) -> bool {
@@ -172,6 +172,7 @@ mod tests {
             Some("COPICK_COPY_OK request=42 focus_preserved=true ms=17\n".into()));
         assert!(metadata_line("COPICK_CAPTURE_CANCEL request=2 reason=mouse_down").is_some());
         assert!(metadata_line("COPICK_CAPTURE_CANCEL request=2 reason=settings_changed").is_some());
+        assert!(metadata_line("COPICK_CAPTURE_CANCEL request=2 reason=cursor_moved").is_some());
         assert!(metadata_line("COPICK_COPY_REJECT invalid_token").is_some());
         assert!(metadata_line("COPICK_COPY_REQUEST").is_some());
         assert!(metadata_line("COPICK_POPUP_PRESENTED focus_preserved=true method=11").is_some());

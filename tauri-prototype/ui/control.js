@@ -7,7 +7,8 @@ const elements = Object.fromEntries([
   'excluded-apps',
   'exclusions-hint', 'exclusions-error', 'diagnostics', 'config-error', 'migration-note', 'version',
   'save', 'revert', 'reload-settings', 'settings-message', 'settings-action-error',
-  'open-logs', 'quit', 'app-message', 'app-error'
+  'open-logs', 'quit', 'app-message', 'app-error',
+  'close-warning', 'close-continue', 'close-discard'
 ].map(id => [id, document.getElementById(id)]));
 const invoke = (command, args) => {
   if (!window.__TAURI__ || !window.__TAURI__.core) {
@@ -25,6 +26,9 @@ let settingsInfo = null;
 let settingsPending = false;
 let settingsNotice = '';
 let appPending = false;
+let closePending = false;
+// 主进程只在草稿状态变化时收到通知，避免每个按键都发一次 IPC。
+let lastDirty = false;
 
 function message(id, text) {
   elements[id].textContent = text || '';
@@ -41,6 +45,12 @@ function dirty() {
   return model.hasChanges(savedConfig, elements['excluded-apps'].value, elements.diagnostics.checked,
     elements['clipboard-fallback'].checked);
 }
+function syncDraftDirty(value) {
+  if (!savedConfig || value === lastDirty) return;
+  lastDirty = value;
+  // 发送失败时回退标记，下一次界面更新会重试。
+  invoke('set_draft_dirty', { dirty: value }).catch(() => { lastDirty = !value; });
+}
 function updateSettingsControls() {
   let validationError = '';
   if (savedConfig) {
@@ -49,6 +59,7 @@ function updateSettingsControls() {
   message('exclusions-error', validationError);
   elements['excluded-apps'].setAttribute('aria-invalid', String(Boolean(validationError)));
   const changed = dirty();
+  syncDraftDirty(changed || settingsPending);
   const locked = !savedConfig || settingsPending;
   elements['excluded-apps'].disabled = locked;
   elements.diagnostics.disabled = locked;
@@ -218,6 +229,45 @@ async function appAction(command) {
   }
 }
 
+// 托盘「在此应用中停用」会改写已保存的排除列表：重新读取基线，
+// 但保留用户正在编辑、尚未保存的草稿。
+async function reloadSavedSettings() {
+  if (!settingsInfo || settingsPending) return;
+  try {
+    const info = model.readSettings(await invoke('settings'));
+    savedConfig = model.copyConfig(info.config);
+    renderSettingsInfo(info);
+    if (!dirty()) restoreDraft();
+    updateSettingsControls();
+  } catch {
+    // 读取失败时保持当前界面；用户仍可通过关闭后重新打开设置重试。
+  }
+}
+function listen(name, handler) {
+  const events = window.__TAURI__ && window.__TAURI__.event;
+  if (events && typeof events.listen === 'function') events.listen(name, handler).catch(() => {});
+}
+listen('close-blocked', () => { elements['close-warning'].hidden = false; });
+listen('settings-changed', reloadSavedSettings);
+
+elements['close-continue'].addEventListener('click', () => {
+  elements['close-warning'].hidden = true;
+});
+elements['close-discard'].addEventListener('click', async () => {
+  if (closePending) return;
+  closePending = true;
+  try {
+    await invoke('close_settings');
+    // 放弃后回到已保存的基线，重新打开设置时不再显示旧草稿。
+    if (savedConfig) { restoreDraft(); settingsNotice = ''; updateSettingsControls(); }
+    elements['close-warning'].hidden = true;
+  } catch (error) {
+    elements['close-warning'].hidden = false;
+    message('app-error', `无法关闭设置窗口：${errorText(error)}`);
+  } finally {
+    closePending = false;
+  }
+});
 if (navigator.userAgent.includes('Windows')) {
   elements.permission.textContent = '检查监听状态';
   elements['excluded-apps'].placeholder = '例如：notepad.exe';

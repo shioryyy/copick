@@ -14,6 +14,15 @@
       <p class="hint">在其他应用中选择文字，点击选区旁的按钮即可复制。</p>
     </header>
 
+    <section id="close-warning" class="warning" aria-labelledby="close-warning-title" hidden>
+      <h2 id="close-warning-title">未保存的更改</h2>
+      <p class="hint">排除列表尚未保存，或设置正在保存。继续编辑可保留当前内容；放弃并关闭会丢弃尚未保存的应用列表，已自动保存的开关仍然生效。</p>
+      <div class="actions">
+        <button id="close-continue" type="button">继续编辑</button>
+        <button id="close-discard" type="button">放弃并关闭</button>
+      </div>
+    </section>
+
     <section aria-labelledby="listener-title">
       <h2 id="listener-title">监听状态</h2>
       <p id="status" role="status">正在连接监听服务…</p>

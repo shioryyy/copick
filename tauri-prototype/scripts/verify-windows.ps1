@@ -46,7 +46,9 @@ if (!$PrototypePid) {
     if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick-tauri-prototype.exe' }
     if (!$LogPath) { $LogPath = Join-Path $artifacts ("prototype-$Scenario-" + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '.log') }
     $env:COPICK_PROTOTYPE_LOG = $LogPath
-    $app = Start-Process $Executable -PassThru
+    # 不带 --background 时设置窗口会在启动后打开并可能抢走前台，
+    # 回退场景的合成按键就会发给设置页而不是 fixture。登录自启也用这个参数。
+    $app = Start-Process $Executable -ArgumentList '--background' -PassThru
     $PrototypePid = $app.Id
     Start-Sleep -Seconds 3
 }

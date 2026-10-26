@@ -26,6 +26,8 @@ struct CaptureRequest {
 };
 struct Selection {
     const char *text; size_t length; int pid; uint64_t window; double x; double y; int method;
+    // bundle identifier，只用于托盘文案与排除项；指针在回调返回前有效。
+    const char *program;
 };
 using InputCallback = void (*)(InputEvent);
 using CaptureCallback = void (*)(uint64_t, const Selection *);
@@ -141,6 +143,18 @@ extern "C" int cp_front_pid() {
         NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
         return app && !app.terminated ? app.processIdentifier : 0;
     }
+}
+
+// CGEvent 坐标与输入事件、AX endBottom 同为“主屏左上角为原点”的屏幕点，
+// 不能用 NSEvent.mouseLocation（左下角原点），否则多显示器下符号相反。
+extern "C" bool cp_cursor_position(double *x, double *y) {
+    if (!x || !y) return false;
+    CGEventRef event = CGEventCreate(nullptr);
+    if (!event) return false;
+    const CGPoint point = CGEventGetLocation(event);
+    CFRelease(event);
+    *x = point.x; *y = point.y;
+    return true;
 }
 
 extern "C" bool cp_start(InputCallback callback) {
@@ -316,7 +330,12 @@ extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback ca
             if (document) CFRelease(document);
             CGPoint point = CGPointMake(capture.x, capture.y);
             if (info.posLevel >= SelectionPositionLevel::Full && std::isfinite(info.endBottom.x) && std::isfinite(info.endBottom.y)) point = info.endBottom;
-            Selection selection = {info.text.data(), info.text.size(), capture.sourcePid, capture.sourceWindow, point.x, point.y, static_cast<int>(info.method)};
+            std::string program;
+            if (NSString *bundle = [front bundleIdentifier]) {
+                const char *identifier = [bundle UTF8String];
+                if (identifier) program = identifier;
+            }
+            Selection selection = {info.text.data(), info.text.size(), capture.sourcePid, capture.sourceWindow, point.x, point.y, static_cast<int>(info.method), program.c_str()};
             [front release];
             Finish(request);
             callback(capture.requestId, result ? &selection : nullptr);
