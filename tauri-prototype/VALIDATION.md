@@ -294,6 +294,28 @@ Windows 便携包内 `copick-tauri-prototype.exe` 为 3,698,688 bytes。两平�
 
 限制：本机已安装 WebView2，未覆盖缺少运行时的引导下载；未测试交互式安装界面、覆盖升级、SmartScreen/组织策略拦截，也未测试登录后由系统实际拉起 `--background` 项（仅验证了登记命令与手动 `--background` 启动行为）。
 
+### 2026-10-27 自动化：安装 → 自启 → 覆盖升级 → 卸载
+
+上一轮是手工点的，结论无法复跑。现在有 `scripts/verify-windows-installer.cs` + `.ps1`（`start-windows-installer-verification.ps1` 负责以交互桌面计划任务运行），七项断言全部通过：
+
+| 断言 | 结果 |
+|---|---|
+| `install` | 静默安装退出码 0，`copick-tauri-prototype.exe` 出现在目标目录 |
+| `installedSmoke` | 安装后的二进制 `--smoke-test` 返回 `{"ok":true,"permission":true}` |
+| `launchAtLogin` | 点设置页开关后 HKCU Run 写入 `"...\copick-tauri-prototype.exe" --background` |
+| `launchAtLoginToggleOff` | 再点一次后 Run 值被删除 |
+| `uninstall` | 静默卸载后安装目录消失 |
+| `runValueCleanedByUninstall` | 卸载后 Run 值无残留 |
+| `reinstallOverExisting` | 覆盖安装退出码 0，安装后仍能启动——**这是上一轮缺的那项** |
+
+实现上有三处必须记住的坑：
+
+1. **启动项只在用户点开关时写入，不读配置**。第一版驱动写了一份「已开启自启」的配置就启动，结果 Run 值永远不出现；必须真的用 UIA 点那个开关，才能覆盖产品的写入路径。
+2. **不能用 `--background` 启动**。那样设置窗口不显示，UIA 找不到开关，验证会报「设置窗口没有出现」。
+3. **卸载结论看文件，不看退出码**。NSIS 卸载器会先把自己复制到临时目录再运行，退出码不可靠。
+
+CI 里 `tauri.yml` 的 Windows 作业已经接上这一步，因此这条路径每次构建都会被真实执行，而不只是记录一次手工结果。
+
 ### 本轮发现并修复
 
 1. 设置窗口默认高 720 逻辑像素，在 1080p、150% 缩放（逻辑高度 720）的屏幕上会超出屏幕底部，导致保存/退出按钮不可达。现在启动时按显示器逻辑尺寸的 90% 收缩并居中；该逻辑有纯函数单测（1440p 不触发收缩，1080p@150% 收缩到 648）。OMEN 1440p 实测未触发收缩，窗口完整可见。
@@ -305,7 +327,7 @@ Windows 便携包内 `copick-tauri-prototype.exe` 为 3,698,688 bytes。两平�
 
 ### 仍未验证
 
-NSIS 覆盖升级、缺少 WebView2 时的引导下载、交互式安装界面与 SmartScreen 行为、Windows ARM64、代码签名与公证、第三方应用兼容矩阵、多显示器与混合缩放。`.github/workflows/tauri.yml` 的 macOS/Windows 作业尚未在真实 GitHub Actions 运行（本机与 OMEN 手动执行了相同命令）。自动剪贴板回退保持关闭；本轮验证的是显式点击浮窗的复制路径。以上均不因本轮结果而视为已验收。
+缺少 WebView2 时的引导下载、交互式安装界面与 SmartScreen 行为、登录后由系统实际拉起启动项、Windows ARM64、代码签名与公证。`.github/workflows/tauri.yml` 的 macOS/Windows 作业尚未在真实 GitHub Actions 运行（本机与 OMEN 手动执行了相同命令）。自动剪贴板回退保持关闭；本轮验证的是显式点击浮窗的复制路径。以上均不因本轮结果而视为已验收。
 
 
 ## 解锁后最终 macOS 验收（2026-10-25）
@@ -531,7 +553,7 @@ EXE：`src-tauri/target/release/copick-tauri-prototype.exe`，**3,284,992 bytes�
 
 ## 尚未验证／实现
 
-- Windows ARM64、NSIS 安装器、无 WebView2 的安装引导、MSAA 独立路径与管理员窗口；已验证的是 x64 UIA 与剪贴板回退两条路径。
+- Windows ARM64、无 WebView2 的安装引导、MSAA 独立路径与管理员窗口；已验证的是 x64 UIA 与剪贴板回退两条路径，以及 NSIS 的安装/自启/覆盖升级/卸载。
 - 第三方真实应用的完整矩阵：浏览器、PDF、Excel、微信和 IDE 等。macOS 侧 2026-10-27 已补 TextEdit 与 Safari（均 ✅），Chrome 未安装、Office 与 IM 未测。
 - Safari 的 WebKit 文本标记回退目前只在 `bridge.mm` 里；上游 `selection-hook` 仍缺这条路径，Electron 版因此依旧取不到 Safari 的选区。是否给上游提 PR 待定。
 - 多显示器、混合缩放、负坐标显示器、全屏 Space、系统安全输入。
