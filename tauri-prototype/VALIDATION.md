@@ -249,6 +249,29 @@ bb50a522…  Copick-Tauri-0.1.0-win-x64.zip
 
 macOS 侧本轮没有任何应用级结果：验证时桌面锁屏，见上一节。矩阵里其余应用、混合缩放、全屏 Space、剪贴板管理器均为未测，`COMPATIBILITY.md` 已按「— 」标注，不能当作已验收。
 
+## 真机兼容矩阵复测（2026-10-27）
+
+在 Tauri 版上把矩阵扩到五个场景并复跑，同时补掉了驱动里一串会**静默误报通过**的缺陷。这一轮最重要的产出不是"又绿了几个应用"，而是：上一版判定只看"浮窗出现了吗"，而浮窗出现在错误位置（比如 Edge 的地址栏）同样会通过。
+
+| 目标 | 取词（回退关闭） | 回退（默认） | 结论 |
+|---|---|---|---|
+| Edge 本地 HTML | ✅ `method=1` | ✅ `method=1` | 复制内容与选区一致 |
+| Word | ✅ `method=1` | ✅ `method=1` | 打开导航窗格、停在文档视图时拖选，复制内容正确 |
+| Windows 11 记事本 | ❌ `COPICK_CAPTURE_EMPTY` | ✅ `method=99` | 同一次拖选里驱动用 UIA `TextPattern.GetSelection()` 读得到正确文字，产品却返回空——收窄了上一轮"疑为 WinUI 版差别"的猜测：**UIA 树有内容，是产品这条路径拿不到** |
+| cmd 控制台 | 应不触发 ✅ | 应不触发 ✅ | 日志无 `COPICK_SELECTION_RECEIVED` |
+| VS Code | ❌ UIA 读不到 Monaco 选区 | 禁用（`NoClipboardPrograms`） | 已开 `editor.accessibilitySupport=on` 并加 `--force-renderer-accessibility`，UIA 仍返回空串。驱动与产品都读不到，是编辑器侧限制，与 Electron 版同为 UIA-only 策略 |
+
+驱动修掉的问题（每一条都已写进 `test/app-matrix-script.test.cjs`）：
+
+1. **哨兵必须用 Win32 剪贴板写**。`.NET Clipboard.SetText` 是 OLE 延迟渲染，产品的 `EmptyClipboard` 要等驱动渲染完，实测把每次复制打成 `COPICK_COPY_TIMEOUT ms≈2030`。换 Win32 `SetClipboardData` 后 trace 立刻变成 `COPICK_COPY_OK ms=0`——那 2 秒不是产品的问题。
+2. **浮窗出现不等于选对了地方**。Edge 场景误拖到地址栏也会弹窗、也会复制，剪贴板里是 URL。现在要求剪贴板内容确实来自测试文档（剥标签、忽略空白、按包含关系比对），否则关掉浮窗换下一个坐标。
+3. **拖拽起点不能写死**。Word 打开导航窗格时正文从客户区 46% 处才开始；驱动现在先用 UIA 找 `Document`/`Edit` 控件外框，找不到再按二维网格扫。
+4. **DPI 感知必须显式打开**。UIA 的 `BoundingRectangle` 用物理像素，`GetClientRect` 默认逻辑像素；150% 缩放下 1265 宽的窗口算出 1803 的右边界，拖拽点整个偏掉。
+5. **期望文本要在启动应用前另存一份**。Word 独占打开文档，驱动事后读抛 `IOException`，场景会变成"验证脚本自己失败"而不是"取词失败"。
+6. **编译失败必须中止**。有一次缺 `WindowsBase` 引用编译失败，脚本继续用上一次的旧 exe 跑，报告字段和源码完全对不上。
+
+驱动同时会写诊断字段：`contentLocated`/`contentRect`、`selectionProbe`、`selectionMadeWithoutPopup`、`uiaSelection`、`clipboardLatencyMs`，失败时还会截一张窗口图，下次排查不用再靠猜。
+
 ## v0.1.0 产品化验收（2026-10-26）
 
 本轮针对完整产品行为（单实例、托盘、设置页、配置持久化、关闭常驻、开机启动、退出）在最终源码上重新 build 和 package。Windows 环境为 OMEN Windows 11 x64 build 26200、2560×1440、150% 缩放、已登录 console Session 2；所有桌面交互经普通权限 Interactive 计划任务执行，未绕过锁屏或权限。
