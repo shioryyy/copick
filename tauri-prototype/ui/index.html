@@ -49,7 +49,11 @@
           <input id="clipboard-fallback" type="checkbox" disabled aria-describedby="fallback-hint">
           <span>兼容复制回退</span>
         </label>
-        <p id="fallback-hint" class="hint">无障碍取词失败时模拟复制快捷键读取选区。会临时改动剪贴板；私有格式、并发复制或剪贴板管理器可能无法完整恢复。</p>
+        <p id="fallback-hint" class="hint">默认关闭。开启后模拟复制快捷键读取选区，会临时改动剪贴板；私有格式、并发复制或剪贴板管理器可能无法完整恢复。</p>
+        <div id="last-failure-row" class="setting-row" hidden>
+          <p id="last-failure" class="hint" role="status"></p>
+          <button id="last-failure-action" type="button" hidden>启用兼容复制回退</button>
+        </div>
       </section>
 
       <section aria-labelledby="exclusions-title">

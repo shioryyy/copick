@@ -401,6 +401,8 @@ class CopickFixture : Form {
                         report["sourceFocused"] = SourceFocused();
                         report["selectionLength"] = text == null ? 0 : text.SelectionLength;
                         report["selectionMatches"] = text != null && text.SelectedText == Expected;
+                        // 记录合成快捷键次数，用来区分「回退执行了但没取到词」和「回退根本没执行」。
+                        report["copyShortcutCount"] = ((ClipboardOnlyControl)source).CopyShortcutCount;
                         Finish(false, "未发现复制浮窗");
                     }
                     return;

@@ -1,6 +1,7 @@
 ﻿param(
     [ValidateSet('double', 'drag', 'background-drag', 'fallback', 'fallback-disabled', 'expiry', 'switch', 'samepid-switch', 'slow-control', 'slow-exit', 'blocked-exit')]
-    [string]$Scenario = 'double'
+    [string]$Scenario = 'double',
+    [string]$Executable = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -8,7 +9,8 @@ $taskName = "CopickTauriPrototypeVerify-$Scenario"
 $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $script = Join-Path $PSScriptRoot 'run-windows-desktop.ps1'
-$executable = Join-Path $root 'src-tauri\target\release\copick-tauri-prototype.exe'
+if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick-tauri-prototype.exe' }
+$executable = $Executable
 if (!(Test-Path $executable)) { throw "找不到原型可执行文件：$executable" }
 $log = Join-Path $artifacts ("prototype-$Scenario-" + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '.log')
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $script + '" -Scenario ' + $Scenario + ' -Executable "' + $executable + '" -LogPath "' + $log + '"')

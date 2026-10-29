@@ -22,7 +22,7 @@ function settings(overrides = {}) {
 }
 function status(overrides = {}) {
   return { permission: true, running: true, paused: false, fallback: false,
-    selections: 0, presented: 0, copies: 0, focusPreserved: null, error: null, ...overrides };
+    selections: 0, presented: 0, copies: 0, focusPreserved: null, error: null, lastFailure: null, ...overrides };
 }
 function harness(userAgent = 'Macintosh') {
   const calls = [], timers = [];
@@ -35,7 +35,8 @@ function harness(userAgent = 'Macintosh') {
       hidden: /\bhidden\b/.test(match[0]), attributes: {},
       setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(name, callback) { listeners[name] = callback; },
-      fire(name) { return listeners[name]({ preventDefault() {} }); }
+      fire(name) { return listeners[name]({ preventDefault() {} }); },
+      requestSubmit() { return this.fire('submit'); }
     };
   }
   const events = {};
@@ -237,6 +238,55 @@ test('回退开关仅在支持平台可用，改动进入草稿并可保存', as
   await saving;
   assert.equal(h.elements['clipboard-fallback'].checked, true);
   assert.equal(h.elements.save.disabled, true);
+});
+test('显示最近一次取词失败，只在值得开启回退时给出入口', async () => {
+  const h = harness('Windows');
+  await loaded(h, settings({ fallbackAvailable: true }));
+  assert.equal(h.elements['last-failure-row'].hidden, true, '没有失败时不占位');
+
+  let polling = h.poll();
+  h.named('status')[1].resolve(status({ lastFailure: { program: 'Excel', reason: 'no_text' } }));
+  await polling;
+  assert.equal(h.elements['last-failure-row'].hidden, false);
+  assert.match(h.elements['last-failure'].textContent, /Excel/);
+  assert.match(h.elements['last-failure'].textContent, /没有取到文字/);
+  assert.equal(h.elements['last-failure-action'].hidden, false);
+
+  // 选中对象时回退读取不了；回退已经在开又失败时再开也没有意义。
+  polling = h.poll();
+  h.named('status')[2].resolve(status({ fallback: true, lastFailure: { program: 'Word', reason: 'non_text' } }));
+  await polling;
+  assert.match(h.elements['last-failure'].textContent, /选中的不是文字/);
+  assert.equal(h.elements['last-failure-action'].hidden, true);
+
+  polling = h.poll();
+  h.named('status')[3].resolve(status({ fallback: true, lastFailure: { program: 'Word', reason: 'fallback_failed' } }));
+  await polling;
+  assert.equal(h.elements['last-failure-action'].hidden, true, '回退已开启时不再劝开回退');
+
+  // 取词恢复正常后提示消失。
+  polling = h.poll();
+  h.named('status')[4].resolve(status());
+  await polling;
+  assert.equal(h.elements['last-failure-row'].hidden, true);
+});
+test('失败提示旁的入口勾选回退并直接保存', async () => {
+  const h = harness('Windows');
+  await loaded(h, settings({ fallbackAvailable: true }));
+  const polling = h.poll();
+  h.named('status')[1].resolve(status({ lastFailure: { program: 'Excel', reason: 'no_text' } }));
+  await polling;
+  const saved = settings({ config: { version: 1, excludedApps: ['terminal'],
+    diagnosticsEnabled: false, clipboardFallback: true } });
+  h.elements['last-failure-action'].fire('click');
+  assert.equal(h.elements['clipboard-fallback'].checked, true);
+  const call = h.named('save_settings')[0];
+  assert.equal(call.args.config.clipboardFallback, true);
+  call.resolve(saved);
+  await flush();
+  assert.equal(h.elements['clipboard-fallback'].checked, true);
+  assert.equal(h.elements['last-failure-action'].hidden, true, '开关打开后入口不再出现');
+  assert.equal(h.elements['settings-message'].textContent, '设置已保存。');
 });
 test('迟到的轮询不能覆盖暂停结果；configure 只提交暂停意图', async () => {
   const h = harness();

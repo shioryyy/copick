@@ -60,6 +60,19 @@ fn cancel_reason(value: &str) -> bool {
         | "present_not_shown" | "copy_source_changed" | "cursor_moved")
 }
 
+fn failure_reason(value: &str) -> bool {
+    matches!(value, "no_text" | "non_text" | "fallback_failed" | "filtered" | "unknown")
+}
+
+/// 程序名来自操作系统，可能带空格、路径或任意字符。日志解析不了就整行丢弃，
+/// 所以先压成固定字符集与长度上限；不接纳任何原样文本。
+pub fn program_token(program: &str) -> String {
+    let token: String = program.trim().to_ascii_lowercase().chars()
+        .map(|value| if value.is_ascii_alphanumeric() || matches!(value, '.' | '-' | '_' | '+') { value } else { '_' })
+        .take(64).collect();
+    if token.bytes().all(|value| value == b'_') { "unknown".into() } else { token }
+}
+
 fn late_reason(value: &str) -> bool {
     matches!(value, "no_flight" | "generation_or_deadline" | "no_selection" | "token_changed")
 }
@@ -68,6 +81,12 @@ fn outcome(value: &str) -> bool { matches!(value, "0" | "1" | "2") }
 fn input_kind(value: &str) -> bool { matches!(value, "1" | "2") }
 fn gesture(value: &str) -> bool { matches!(value, "0" | "1" | "2" | "3") }
 fn method(value: &str) -> bool { matches!(value, "0" | "1" | "2" | "3" | "11" | "99") }
+/// 只接纳 `program_token` 的输出：小写、固定字符集、长度有界。
+fn program(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 64
+        && value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()
+            || matches!(byte, b'.' | b'-' | b'_' | b'+'))
+}
 
 type Field = (&'static str, fn(&str) -> bool);
 
@@ -78,7 +97,8 @@ fn metadata_line(message: &str) -> Option<String> {
     let mut words = message.split_ascii_whitespace();
     let event = words.next()?;
     let schema: &[Field] = match event {
-        "COPICK_CAPTURE_EMPTY" | "COPICK_CAPTURE_TIMEOUT" | "COPICK_CAPTURE_REJECT"
+        "COPICK_CAPTURE_EMPTY" => &[("request", number), ("reason", failure_reason), ("program", program)],
+        "COPICK_CAPTURE_TIMEOUT" | "COPICK_CAPTURE_REJECT"
         | "COPICK_SELECTION_RECEIVED" | "COPICK_POPUP_PREPARING" | "COPICK_COPY_BEGIN" =>
             &[("request", number)],
         "COPICK_CAPTURE_CANCEL" => &[("request", number), ("reason", cancel_reason)],
@@ -173,6 +193,15 @@ mod tests {
         assert!(metadata_line("COPICK_CAPTURE_CANCEL request=2 reason=mouse_down").is_some());
         assert!(metadata_line("COPICK_CAPTURE_CANCEL request=2 reason=settings_changed").is_some());
         assert!(metadata_line("COPICK_CAPTURE_CANCEL request=2 reason=cursor_moved").is_some());
+        assert_eq!(metadata_line("COPICK_CAPTURE_EMPTY request=7 reason=no_text program=excel.exe"),
+            Some("COPICK_CAPTURE_EMPTY request=7 reason=no_text program=excel.exe\n".into()));
+        assert!(metadata_line("COPICK_CAPTURE_EMPTY request=7 reason=fallback_failed program=unknown").is_some());
+        assert!(metadata_line("COPICK_CAPTURE_EMPTY request=7 reason=filtered program=cmd.exe").is_some());
+        assert_eq!(program_token("Excel.EXE"), "excel.exe");
+        assert_eq!(program_token("Code - Insiders.exe"), "code_-_insiders.exe");
+        assert_eq!(program_token("../../secret"), ".._.._secret");
+        assert_eq!(program_token(""), "unknown");
+        assert_eq!(program_token(&"a".repeat(100)).len(), 64);
         assert!(metadata_line("COPICK_COPY_REJECT invalid_token").is_some());
         assert!(metadata_line("COPICK_COPY_REQUEST").is_some());
         assert!(metadata_line("COPICK_POPUP_PRESENTED focus_preserved=true method=11").is_some());
@@ -183,7 +212,11 @@ mod tests {
             "COPICK_COPY_OK request=42 focus_preserved=secret ms=17",
             "COPICK_COPY_BEGIN request=hello", "COPICK_COPY_BEGIN request=1 request=2",
             "COPICK_COPY_BEGIN request=18446744073709551616",
-            "COPICK_COPY_BEGIN request=1\nCOPICK_COPY_REQUEST"] {
+            "COPICK_COPY_BEGIN request=1\nCOPICK_COPY_REQUEST",
+            "COPICK_CAPTURE_EMPTY request=7",
+            "COPICK_CAPTURE_EMPTY request=7 reason=private_text program=excel.exe",
+            "COPICK_CAPTURE_EMPTY request=7 reason=no_text program=Excel.exe",
+            "COPICK_CAPTURE_EMPTY request=7 reason=no_text program=C:\\secret\\a.exe"] {
             assert!(metadata_line(message).is_none(), "{message}");
         }
     }
