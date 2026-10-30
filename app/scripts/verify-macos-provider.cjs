@@ -49,7 +49,7 @@ function appAlive(pid) {
 }
 
 function compileFixture() {
-  const source = path.resolve(root, '../app/node_modules/selection-hook/src/mac');
+  const source = path.resolve(root, 'node_modules/selection-hook/src/mac');
   fs.mkdirSync(path.dirname(executable), { recursive: true });
   fs.writeFileSync(path.join(bundle, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -1,86 +1,24 @@
 {
-  "name": "copick-app",
-  "version": "0.3.0-beta.2",
+  "name": "copick-tauri-prototype",
+  "version": "0.1.0",
   "private": true,
-  "description": "Local-only cross-platform selection copy utility",
-  "author": "Copick contributors",
-  "license": "MIT",
-  "main": "src/main.js",
-  "engines": {
-    "node": ">=22.12.0"
-  },
   "scripts": {
-    "build:native": "node scripts/build-native.cjs",
-    "prestart": "npm run build:native",
-    "start": "electron .",
-    "prepack:mac": "npm run build:native -- arm64",
-    "prepack:win": "npm run build:native -- x64",
-    "predist:win": "npm run build:native -- x64",
-    "check": "node --check scripts/build-native.cjs && node --check src/foreground.js && node --check src/main.js && node --check src/preload.js && node --check src/policy.js && node --check src/config.js && node --check src/settings.js && node --check src/program-names.js && node --check src/popup.js",
-    "test": "node --test test/*.test.js",
-    "test:ui": "node test/ui-regression.cjs",
-    "pretest:foreground": "npm run build:native",
-    "test:foreground": "node test/foreground-regression.cjs",
-    "pack:mac": "electron-builder --mac zip --arm64",
-    "pack:win": "electron-builder --win --x64 --dir",
-    "dist:win": "electron-builder --win --x64"
+    "dev": "node scripts/tauri.cjs dev",
+    "build": "node scripts/tauri.cjs build",
+    "package": "node scripts/package.cjs",
+    "check": "node scripts/tauri.cjs check",
+    "test": "node --test test/*.test.cjs && node scripts/tauri.cjs test",
+    "verify:mac": "node scripts/verify-macos.cjs",
+    "verify:mac-copy-gate": "node scripts/verify-macos-copy-gate.cjs",
+    "verify:mac-guardian": "node scripts/verify-macos-guardian.cjs",
+    "verify:mac-first-frame": "node scripts/verify-macos-first-frame.cjs",
+    "verify:mac-textedit": "node scripts/verify-macos-apps.cjs textedit",
+    "verify:mac-safari": "node scripts/verify-macos-apps.cjs safari"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
   },
   "dependencies": {
     "selection-hook": "2.1.1"
-  },
-  "devDependencies": {
-    "electron": "44.8.0",
-    "electron-builder": "26.15.3",
-    "node-gyp": "12.4.0"
-  },
-  "build": {
-    "appId": "local.copick.app",
-    "productName": "Copick",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "src/**/*",
-      "assets/**/*",
-      "native/foreground/build/Release/foreground.node",
-      "package.json"
-    ],
-    "asar": true,
-    "asarUnpack": [
-      "node_modules/selection-hook/prebuilds/**/*",
-      "native/foreground/build/Release/foreground.node"
-    ],
-    "npmRebuild": false,
-    "mac": {
-      "icon": "assets/icon.icns",
-      "target": [
-        "zip"
-      ],
-      "category": "public.app-category.utilities",
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
-      "hardenedRuntime": true
-    },
-    "win": {
-      "icon": "assets/icon.ico",
-      "target": [
-        "zip",
-        "nsis"
-      ]
-    },
-    "artifactName": "Copick-${version}-${os}-${arch}.${ext}",
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "runAfterFinish": true,
-      "deleteAppDataOnUninstall": false,
-      "artifactName": "Copick-Setup-${version}-${os}-${arch}.${ext}",
-      "shortcutName": "Copick",
-      "uninstallDisplayName": "Copick",
-      "language": "2052"
-    }
   }
 }

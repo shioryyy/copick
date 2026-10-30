@@ -16,7 +16,7 @@ fs.writeFileSync(path.join(bundle, 'Info.plist'), `<?xml version="1.0" encoding=
 <plist version="1.0"><dict><key>CFBundleExecutable</key><string>CopickFirstFrameFixture</string><key>CFBundleIdentifier</key><string>local.test.copick-first-frame</string><key>CFBundleName</key><string>CopickFirstFrameFixture</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
 `);
 const native = path.join(root, 'src-tauri/native');
-const source = path.resolve(root, '../app/node_modules/selection-hook/src/mac');
+const source = path.resolve(root, 'node_modules/selection-hook/src/mac');
 const compiled = spawnSync('clang++', ['-std=c++17', '-fno-objc-arc', '-fblocks', '-fexceptions', '-frtti', '-pthread',
   '-include', 'algorithm', '-include', 'cctype', '-I', native, '-I', source,
   path.join(__dirname, 'verify-macos-first-frame.mm'), path.join(native, 'bridge.mm'),

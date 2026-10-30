@@ -1,10 +1,7 @@
-dist/
 .DS_Store
 node_modules/
-app/release/
-app/native/foreground/build/
 .tauri-tools/
-tauri-prototype/src-tauri/target/
-tauri-prototype/src-tauri/gen/
-tauri-prototype/artifacts/
-tauri-prototype/.tools/
+app/src-tauri/target/
+app/src-tauri/gen/
+app/artifacts/
+app/.tools/

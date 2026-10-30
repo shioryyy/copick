@@ -179,6 +179,8 @@ Windows 引擎的 `GetSelectedText` 接受 stop token，回退可在备份后、
 
 ## Release 流水线与签名（2026-10-26）
 
+> 本节记录的是当时 Electron 与 Tauri 并行发布的状态。此后 Electron 版已删除，`ci.yml`、`release.yml` 与 `COPICK_PUBLISH_TAURI` 一并移除，Tauri 产物只留在 Actions 附件里。
+
 `.github/workflows/tauri.yml` 改为可复用工作流（`workflow_call`，声明 8 个可选 secrets），`release.yml` 随之增加 `tauri` 作业，`publish` 依赖 `[build, tauri]`：打 `v*` tag 时 Electron 与 Tauri 并行构建，任一失败都阻止发布。
 
 ### 签名管线
@@ -542,7 +544,7 @@ CI 里 `tauri.yml` 的 Windows 作业已经接上这一步，因此这条路径�
 - capture/copy 改为 request 自有内存＋异步完成回调，Rust 使用 request ID、generation、两秒截止时间和 UUID token。主线程不等待取词/复制完成；Windows worker/hook 初始化仍存在有界同步等待。
 - 有界输入队列增加 epoch 与 500ms 年龄限制，暂停/溢出会拒绝旧事件；completion overflow 会使当前状态失效。展示只在原生 show 成功且来源仍匹配时确认，复制等待最终完成回执。
 - 控制页实测发现 `tauri://localhost` 的空 path 被来源白名单误拒绝，导致状态/暂停不可用；新增 Rust 回归先失败后修复，只对 control 接受合法本地首页空路径，其他页面、来源和窗口仍拒绝。修复后实际点击暂停/恢复，状态依次为运行中→已暂停→运行中；恢复后 double 精确复制通过，关闭控制窗口后进程退出码为 0、没有原型/fixture 残留。此验证未模拟慢 provider。
-- `npm --prefix tauri-prototype test`：7 条 JS popup、9 条验证报告回归、1 条实际编译 C++ 来源 helper、1 条 operation gate 并发回归和 8 条 Rust 生命周期/来源/队列测试通过。此前 popup、报告和控制页来源测试都在修复前复现失败；gate 回归使用同一产品 helper 竞争取消和提交 2,000 次。另有 macOS 独立 harness 在真实系统剪贴板强制五个顺序通过，不经过完整产品 AX/copy 路径。
+- `npm --prefix app test`：7 条 JS popup、9 条验证报告回归、1 条实际编译 C++ 来源 helper、1 条 operation gate 并发回归和 8 条 Rust 生命周期/来源/队列测试通过。此前 popup、报告和控制页来源测试都在修复前复现失败；gate 回归使用同一产品 helper 竞争取消和提交 2,000 次。另有 macOS 独立 harness 在真实系统剪贴板强制五个顺序通过，不经过完整产品 AX/copy 路径。
 - macOS 前一轮 release `.app` 六项桌面回归已通过；本轮新增窗口绑定/提交边界后的构建也成功，但辅助功能权限阻挡了新产品链路复验。前一轮驱动先确认测试窗口位于前台，再发送真实鼠标输入；double、drag、expiry、switch、other-click、fallback-disabled 六场景通过。double/drag 使用 `method=11`，精确复制 15 字符且源焦点和选区保留；expiry/switch 隐藏浮窗、sentinel 未变，switch 额外确认前台确已变化；fallback-disabled 的复制快捷键调用数为 0。WKWebView snapshot 已保存并查看，按钮正常。
 - 新增 other-click 回归在旧构建上确认中键点击后浮窗仍可见；补齐 `kCGEventOtherMouseDown/Up` 订阅后通过。最终构建的五项交互报告在 `artifacts/async-mac-final-<场景>/verification.json`，回退关闭报告在 `artifacts/async-mac-fallback-disabled/verification.json`，截图为 `artifacts/async-mac-fixed-popup.png`。中键实测通过不等于侧键硬件兼容性已验证。
 - 两平台验证驱动在启动前删除旧报告，要求 fixture 退出码为 0，报告场景和 sourcePid 必须属于本次运行；缺失、崩溃和旧报告不会误计通过。macOS 增加 18 秒进程内 watchdog，常规超时会先恢复剪贴板；备份中任一格式无法读取或 changeCount 变化则在写 sentinel 前停止。六项最终报告均确认 `testClipboardRestored=true`；若进程彻底挂死或被外部强杀，仍不能保证恢复。Windows 新 runner 已在冻结源码的十项场景中真实执行，逐场景验证 fixture 退出与报告来源，不能追溯性提升此前旧记录的证据强度。

@@ -2,40 +2,15 @@ name: Tauri packages
 
 on:
   workflow_dispatch:
-  # release.yml 调用本工作流，让打 tag 时 Tauri 构建与 Electron 构建走同一份步骤。
-  workflow_call:
-    secrets:
-      MAC_CSC_LINK:
-        required: false
-      MAC_CSC_KEY_PASSWORD:
-        required: false
-      MAC_SIGNING_IDENTITY:
-        required: false
-      APPLE_ID:
-        required: false
-      APPLE_APP_SPECIFIC_PASSWORD:
-        required: false
-      APPLE_TEAM_ID:
-        required: false
-      WIN_CSC_LINK:
-        required: false
-      WIN_CSC_KEY_PASSWORD:
-        required: false
   pull_request:
     paths:
       - '.github/workflows/tauri.yml'
-      - 'tauri-prototype/**'
-      - 'app/package.json'
-      - 'app/package-lock.json'
-      - 'app/assets/**'
+      - 'app/**'
   push:
     branches: [main]
     paths:
       - '.github/workflows/tauri.yml'
-      - 'tauri-prototype/**'
-      - 'app/package.json'
-      - 'app/package-lock.json'
-      - 'app/assets/**'
+      - 'app/**'
 
 permissions:
   contents: read
@@ -70,9 +45,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            app/package-lock.json
-            tauri-prototype/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Verify native runner architecture
         env:
@@ -89,14 +62,11 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install selection-hook source without Electron install scripts
-        run: npm --prefix app ci --ignore-scripts
-
       - name: Install Tauri CLI
-        run: npm --prefix tauri-prototype ci
+        run: npm --prefix app ci
 
       - name: Test Tauri
-        run: npm --prefix tauri-prototype test
+        run: npm --prefix app test
 
       # 与 Electron 版共用同一组仓库密钥：存在证书时签名，存在 App Store Connect
       # 凭据时同时公证；两者都没有时保持和以前一致的 ad-hoc 签名，绝不半途失败。
@@ -133,7 +103,7 @@ jobs:
           fi
 
       - name: Build native app or NSIS installer
-        run: npm --prefix tauri-prototype run build
+        run: npm --prefix app run build
 
       # Tauri 没有内置的 Windows Authenticode 入口，构建后、打包前用 signtool 签
       # 可执行文件与 NSIS 安装包；便携 ZIP 由下一步从已签名的可执行文件生成。
@@ -153,8 +123,8 @@ jobs:
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
-          $targets = @(Get-ChildItem 'tauri-prototype/src-tauri/target/release/copick-tauri-prototype.exe')
-          $targets += @(Get-ChildItem 'tauri-prototype/src-tauri/target/release/bundle/nsis/*.exe')
+          $targets = @(Get-ChildItem 'app/src-tauri/target/release/copick-tauri-prototype.exe')
+          $targets += @(Get-ChildItem 'app/src-tauri/target/release/bundle/nsis/*.exe')
           foreach ($file in $targets) {
             & $signtool.FullName sign /f $pfx /p $env:WIN_CSC_KEY_PASSWORD /fd sha256 /td sha256 `
               /tr http://timestamp.digicert.com $file.FullName
@@ -168,7 +138,7 @@ jobs:
           "Windows: signed $($targets.Count) artifacts." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 
       - name: Smoke test actual binary and package release artifacts
-        run: npm --prefix tauri-prototype run package
+        run: npm --prefix app run package
 
       # 安装包是用户拿到的第一件东西，而 smoke test 只证明构建产物能启动，
       # 不证明它装得上。这里静默安装到临时目录、点一次开机自启开关、覆盖安装、再卸载。
@@ -178,9 +148,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & tauri-prototype/scripts/verify-windows-installer.ps1
+          & app/scripts/verify-windows-installer.ps1
           if ($LASTEXITCODE -ne 0) { throw "installer verification failed ($LASTEXITCODE)" }
-          Get-Content tauri-prototype/artifacts/installer-verification.json -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          Get-Content app/artifacts/installer-verification.json -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 
       - name: Record signing status
         shell: bash
@@ -194,6 +164,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: tauri-prototype/artifacts/release/*
+          path: app/artifacts/release/*
           if-no-files-found: error
           retention-days: 14

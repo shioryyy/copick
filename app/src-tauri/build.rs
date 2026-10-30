@@ -3,7 +3,7 @@ use std::{env, path::PathBuf};
 fn main() {
     let platform = env::var("CARGO_CFG_TARGET_OS").unwrap();
     assert!(platform == "macos" || platform == "windows", "原型仅支持 macOS 和 Windows");
-    let package = PathBuf::from("../../app/node_modules/selection-hook");
+    let package = PathBuf::from("../node_modules/selection-hook");
     let metadata: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(package.join("package.json")).expect("请先在 app/ 执行 npm ci"),
     ).expect("无法读取 selection-hook 元数据");
