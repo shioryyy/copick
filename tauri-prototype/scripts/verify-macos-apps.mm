@@ -339,23 +339,18 @@ static void OnCapture(uint64_t id, const Selection *selection) {
         anchorY = selection->y;
     }
     dispatch_async(dispatch_get_main_queue(), ^{
-        // Safari 27 的选区只走文本标记范围，产品的 AXSelectedText 取词必定为空。
-        // 这里把这条已知限制固化下来：现象变了就报错，提醒更新兼容矩阵。
-        bool expectCapture = ![mode isEqualToString:@"safari"];
         if (!selection) {
-            if (expectCapture) { Finish(false, @"产品没有取到选区（AX 路径返回空）"); return; }
+            // 区分“拖选本身没成功”和“拖选成功但产品没取到”：
+            // 前者是测试环境问题，后者是产品缺口，排查方向完全不同。
             bool observed = [report[@"selectionObserved"] boolValue];
             NSString *marker = report[@"textMarkerSelection"];
             if (observed && [marker isEqualToString:expected]) {
-                report[@"knownLimitation"] = @"Safari 27 只提供 AXSelectedTextMarkerRange，不提供 AXSelectedText";
-                Finish(true, @"拖选成功，网页报告的选区正确；但 Safari 不提供 AXSelectedText，产品取词为空（已知限制，Electron 版走同一个引擎，同样受影响）");
+                Finish(false, @"拖选成功、WebKit 文本标记范围也正确，但产品取词为空：WebKit 回退没有生效");
+            } else if (!observed) {
+                Finish(false, @"拖选没有产生选区（页面自己报告的选区为空）");
             } else {
-                Finish(false, @"拖选没有产生选区，或文本标记范围与预期不符");
+                Finish(false, @"产品没有取到选区，且文本标记范围与预期不符");
             }
-            return;
-        }
-        if (!expectCapture) {
-            Finish(false, @"Safari 现在能通过 AXSelectedText 取到词了，请复测并更新兼容矩阵");
             return;
         }
         report[@"capturedText"] = text ?: @"";
