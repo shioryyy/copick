@@ -8,7 +8,14 @@
 
 ## 下载
 
-[GitHub Releases](https://github.com/shioryyy/copick/releases) 里现有的包是旧的 Electron 版，不再更新。当前版本只有 CI 附件：在 Actions 的 **Tauri packages** 运行里下载 `copick-tauri-mac-arm64` / `copick-tauri-win-x64`，解开外层 ZIP 后按 [app/RELEASE.md](app/RELEASE.md) 校验与安装。产物未代码签名，首次运行可能被系统拦截。
+[GitHub Releases](https://github.com/shioryyy/copick/releases) 里现有的包是旧的 Electron 版，不再更新。当前版本只有 CI 附件：在 Actions 的 **Tauri packages** 运行里下载 `copick-tauri-mac-arm64` / `copick-tauri-win-x64`，解开外层 ZIP 后按 [app/RELEASE.md](app/RELEASE.md) 校验与安装。
+
+产物未代码签名，第一次运行时系统会拦一次，按下面放行即可（只需要做一次）：
+
+- **Windows**：运行 `copick-tauri-prototype.exe` 或安装包时，SmartScreen 显示「Windows 已保护你的电脑」。点「更多信息」→「仍要运行」。便携 ZIP 解压出来的文件带 Mark-of-the-Web，所以第一次一定会有这一步；安装版还会多一次 UAC 的「未知发布者」确认。
+- **macOS**：解压后在「访达」里**右键 → 打开**（不要双击），在提示里再点「打开」。或者执行 `xattr -dr com.apple.quarantine "Copick Tauri.app"`。不要为此关闭 Gatekeeper。
+
+这跟包有没有损坏无关，只是没有向微软和苹果买证书。买了证书也只能少一次提示，换不来别的。
 
 ## 目录
 
@@ -49,7 +56,9 @@ macOS 首次使用需要在系统设置中授予辅助功能权限，可从设�
 
 应用以单实例运行，重复启动会打开已有实例的设置页。关闭设置窗口后仍在系统托盘常驻，可从托盘暂停、恢复、打开设置或退出。
 
-设置保存在 Tauri 应用标识 `local.copick.tauri` 对应的独立配置目录。诊断日志默认关闭，可在设置页开启并打开日志文件夹。
+设置保存在 Tauri 应用标识 `local.copick.tauri` 对应的独立配置目录：Windows 为 `%APPDATA%\local.copick.tauri`，macOS 为 `~/Library/Application Support/local.copick.tauri`。诊断日志默认关闭，可在设置页开启并打开日志文件夹。
+
+**便携模式**：程序旁边（macOS 是 `Copick Tauri.app` 旁边）有 `data` 目录时，配置与日志写进这个目录，整个文件夹拷到别的机器能接着用。Windows 的便携 ZIP 自带 `data`，解压即可；安装版没有该目录，用系统配置目录。macOS 想便携就在 `.app` 旁边自己建一个 `data` 目录。删掉 `data` 就恢复系统配置目录，原来的配置不会自动搬过去。
 
 ## 当前支持范围
 
