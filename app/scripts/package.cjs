@@ -29,12 +29,16 @@ function run(executable, args, options = {}) {
   return result.stdout;
 }
 
-function smokeTest(executable) {
+function smokeTest(executable, expected = {}) {
   const stdout = run(executable, ['--smoke-test'], { timeout: 30000 });
   let result;
   try { result = JSON.parse(stdout.trim()); }
   catch { throw new Error(`Smoke test did not return JSON: ${stdout}`); }
   if (result?.ok !== true) throw new Error(`Smoke test did not return ok: true: ${stdout}`);
+  // 便携模式只看程序旁边有没有 data 目录，这里拿真实产物的布局对一次。
+  if (expected.portable !== undefined && result.portable !== expected.portable) {
+    throw new Error(`Smoke test reported portable=${result.portable}, expected ${expected.portable}: ${stdout}`);
+  }
   console.log(`Smoke test passed: ${JSON.stringify(result)}`);
 }
 
@@ -42,7 +46,7 @@ function zipWindows(directory, destination) {
   // Keep paths out of PowerShell source; -LiteralPath also handles wildcard characters.
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-    "$ErrorActionPreference = 'Stop'; $files = @(Get-ChildItem -LiteralPath $env:COPICK_PACKAGE_SOURCE -File | ForEach-Object { $_.FullName }); Compress-Archive -LiteralPath $files -DestinationPath $env:COPICK_PACKAGE_ZIP -CompressionLevel Optimal"], {
+    "$ErrorActionPreference = 'Stop'; $items = @(Get-ChildItem -LiteralPath $env:COPICK_PACKAGE_SOURCE | ForEach-Object { $_.FullName }); Compress-Archive -LiteralPath $items -DestinationPath $env:COPICK_PACKAGE_ZIP -CompressionLevel Optimal"], {
     env: { ...process.env, COPICK_PACKAGE_SOURCE: directory, COPICK_PACKAGE_ZIP: destination },
   });
 }
@@ -70,7 +74,7 @@ function main() {
     if (platform === 'darwin') {
       const app = requirePath(path.join(release, 'bundle', 'macos', `${config.productName}.app`), true);
       requirePath(path.join(app, 'Contents', 'Resources', 'NOTICE-selection-hook.txt'));
-      smokeTest(requirePath(path.join(app, 'Contents', 'MacOS', binaryName)));
+      smokeTest(requirePath(path.join(app, 'Contents', 'MacOS', binaryName)), { portable: false });
       const name = `Copick-Tauri-${version}-mac-arm64.zip`;
       run('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, path.join(packages, name)]);
       names.push(name);
@@ -84,7 +88,14 @@ function main() {
       const executable = path.join(portable, `${binaryName}.exe`);
       fs.copyFileSync(requirePath(path.join(release, `${binaryName}.exe`)), executable);
       fs.copyFileSync(requirePath(path.join(root, 'src-tauri', 'NOTICE-selection-hook.txt')), path.join(portable, 'NOTICE-selection-hook.txt'));
-      smokeTest(executable);
+      // 便携版自带 data 目录：存在即启用便携模式，配置和日志都写在这里，
+      // 整个文件夹拷到别的机器就能接着用。删掉它则回到系统配置目录。
+      const data = path.join(portable, 'data');
+      fs.mkdirSync(data);
+      fs.writeFileSync(path.join(data, 'README.txt'),
+        '这个目录存在时，Copick Tauri 以便携模式运行，config.json 和 logs/ 都写在这里。\n' +
+        '删掉整个 data 目录，程序会改回使用系统的用户配置目录。\n', 'utf8');
+      smokeTest(executable, { portable: true });
       const zip = `Copick-Tauri-${version}-win-x64.zip`;
       const setup = `Copick-Tauri-Setup-${version}-win-x64.exe`;
       zipWindows(portable, path.join(packages, zip));

@@ -4,6 +4,7 @@ mod config;
 mod diagnostics;
 mod program_names;
 mod startup;
+mod storage;
 
 use serde::Serialize;
 use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem}, tray::TrayIconBuilder};
@@ -628,6 +629,13 @@ fn open_logs(window: WebviewWindow) -> Result<(), String> {
     let result = std::process::Command::new("explorer.exe").arg(&path).spawn();
     result.map(|_| ()).map_err(|_| "无法打开日志目录。".into())
 }
+/// 便携模式下配置与日志放在程序旁边的 `data/`，否则用系统配置目录。
+fn storage_directory(app: &tauri::App) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    if let Some(root) = std::env::current_exe().ok().and_then(|exe| storage::portable_root(&exe)) {
+        return Ok(root);
+    }
+    Ok(app.path().app_config_dir()?)
+}
 /// 退出前先让设置页处理未保存草稿；托盘与设置页共用这一入口。
 fn request_quit(app: &tauri::AppHandle) {
     let dirty = app.state::<Mutex<State>>().lock().unwrap().draft_dirty;
@@ -922,7 +930,10 @@ async fn copy_selection(app: tauri::AppHandle, window: WebviewWindow, token: Str
 fn main() {
     if std::env::args().any(|arg| arg == "--smoke-test") {
         let permission = unsafe { cp_permission(false) };
-        println!("{}", serde_json::json!({"ok":true,"permission":permission,"frontPid":unsafe { cp_front_pid() }}));
+        // 打包脚本用这一项确认便携 ZIP 里的程序确实会写到旁边的 data/：只报布尔值，
+        // 不输出路径，免得把用户名带进 CI 日志。
+        let portable = std::env::current_exe().ok().and_then(|exe| storage::portable_root(&exe)).is_some();
+        println!("{}", serde_json::json!({"ok":true,"permission":permission,"frontPid":unsafe { cp_front_pid() },"portable":portable}));
         return;
     }
     tauri::Builder::default()
@@ -935,7 +946,7 @@ fn main() {
         .manage(Mutex::new(State::default()))
         .invoke_handler(tauri::generate_handler![status, configure, permission, settings, save_settings, set_startup, open_logs, quit, set_draft_dirty, close_settings, popup_state, present, copy_selection])
         .setup(|app| {
-            let directory = app.path().app_config_dir()?;
+            let directory = storage_directory(app)?;
             let store = config::Store::load(directory.join("config.json"));
             diagnostics::init(directory.join("logs/selection.log"));
             {

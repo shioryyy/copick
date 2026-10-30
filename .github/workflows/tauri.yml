@@ -105,10 +105,63 @@ jobs:
       - name: Build native app or NSIS installer
         run: npm --prefix app run build
 
-      # Tauri 没有内置的 Windows Authenticode 入口，构建后、打包前用 signtool 签
-      # 可执行文件与 NSIS 安装包；便携 ZIP 由下一步从已签名的可执行文件生成。
+      # SignPath 的开源免费签名。需要先在 SignPath 建好项目、签名策略与 artifact
+      # configuration，把 org id / slug 存成仓库变量、API token 存成 secret；变量为空
+      # 时整段跳过，行为与以前一致（未签名）。签名必须在打包之前，便携 ZIP 由下一步
+      # 从已签名的可执行文件生成。
+      - name: Upload unsigned Windows binaries for signing
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        id: unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-windows-binaries
+          path: |
+            app/src-tauri/target/release/copick-tauri-prototype.exe
+            app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign Windows binaries with SignPath
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ runner.temp }}/signed
+
+      # SignPath 返回的是它按 artifact configuration 产出的文件；这里按文件名把
+      # 可执行文件和安装包放回构建目录，并断言签名有效，放不回去就直接失败。
+      - name: Verify the SignPath signatures and restore the binaries
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: pwsh
+        run: |
+          $signed = Join-Path $env:RUNNER_TEMP 'signed'
+          $exe = Get-ChildItem -Path $signed -Recurse -Filter 'copick-tauri-prototype.exe' | Select-Object -First 1
+          $setup = Get-ChildItem -Path $signed -Recurse -Filter '*.exe' |
+            Where-Object { $_.Name -ne 'copick-tauri-prototype.exe' } | Select-Object -First 1
+          if (-not $exe -or -not $setup) {
+            throw 'SignPath did not return both copick-tauri-prototype.exe and the NSIS installer; check the artifact configuration'
+          }
+          $target = 'app/src-tauri/target/release/copick-tauri-prototype.exe'
+          $installer = Get-ChildItem 'app/src-tauri/target/release/bundle/nsis/*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer not found before signing' }
+          Copy-Item $exe.FullName $target -Force
+          Copy-Item $setup.FullName $installer.FullName -Force
+          foreach ($file in @($target, $installer.FullName)) {
+            $signature = Get-AuthenticodeSignature $file
+            if ($signature.Status -ne 'Valid') { throw "Invalid signature on $($file): $($signature.Status)" }
+          }
+          "Windows: signed $($exe.Name) and $($installer.Name) with SignPath." |
+            Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      # 自带证书的路径。SignPath 启用时跳过，避免同一批文件签两次。
       - name: Sign Windows artifacts
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID == ''
         shell: pwsh
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
