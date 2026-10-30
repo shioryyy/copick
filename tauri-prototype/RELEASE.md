@@ -1,22 +1,21 @@
 # Copick Tauri 构建与分发
 
-这是独立于 Electron 的 Tauri 打包入口。产品名为 **Copick Tauri**，应用标识为 `local.copick.tauri`，可执行文件名仍为 `copick-tauri-prototype`（Windows 带 `.exe`）。版本取自 `src-tauri/tauri.conf.json`，发布前应同步核对 `package.json` 和 `src-tauri/Cargo.toml` 的版本。
+产品名为 **Copick Tauri**，应用标识为 `local.copick.tauri`，可执行文件名仍为 `copick-tauri-prototype`（Windows 带 `.exe`）。版本取自 `src-tauri/tauri.conf.json`，发布前应同步核对 `package.json` 和 `src-tauri/Cargo.toml` 的版本。
 
-没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了与 Electron 版相同的仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。`tauri.yml` 自身只生成可下载附件，不发布；打 tag 时由 `release.yml` 调用同一份步骤。自动构建通过不等于完成真实安装和桌面功能验收。
+没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。`tauri.yml` 只生成可下载附件，不创建 GitHub Release。自动构建通过不等于完成真实安装和桌面功能验收。
 
 ## 构建要求
 
 - macOS：Apple Silicon（arm64），Xcode Command Line Tools，Node.js 22.12+，Rust stable；应用配置的最低系统版本为 macOS 12.0，实际兼容性需在目标系统确认。使用系统 WKWebView，无需随包分发 WebView。
 - Windows：x64 Windows，Visual Studio 2022 C++ Build Tools / Windows SDK，x64 MSVC Rust stable，Node.js 22.12+。原生编译与 C++ 单元测试必须在 x64 Developer PowerShell 中执行；仅安装 MSVC 而没有加载开发环境会导致 `cl` 不可用。
 - Windows 运行需要系统安装 **Microsoft Edge WebView2 Evergreen Runtime**。便携 ZIP 不包含该运行时，应提前从微软官方渠道安装；NSIS 在缺少运行时时下载引导程序，因此首次安装可能需要网络及组织策略允许。当前不提供离线 WebView2 安装包。CI 的 smoke test 不创建 WebView，不能证明目标机器具备 WebView2。
-- `selection-hook@2.1.1` 的原生源码由 `app/package-lock.json` 固定。安装 `app/` 依赖时使用 `--ignore-scripts`，避免为 Tauri 构建执行 Electron 下载、重建等安装脚本。
+- `selection-hook@2.1.1` 的原生源码由 `tauri-prototype/package-lock.json` 固定，`build.rs` 直接从 `tauri-prototype/node_modules/selection-hook` 编译。装依赖时用 `--ignore-scripts`，避免执行该包自带的 native 重建脚本。
 
 ## 手动构建
 
 以下命令从仓库根目录执行，不需要启动 Electron。
 
 ```sh
-npm --prefix app ci --ignore-scripts
 npm --prefix tauri-prototype ci
 npm --prefix tauri-prototype test
 npm --prefix tauri-prototype run build
@@ -49,7 +48,7 @@ rustc -vV
 
 ## 独立 CI
 
-`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`，以及 main push / PR 的 Tauri 路径变化；依赖锁文件、`app/package.json` 和 `app/assets/` 变化也会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
+`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`，以及 main push / PR 的 Tauri 路径变化；`.github/workflows/tauri.yml` 与 `tauri-prototype/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
 
 CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。
 
@@ -66,17 +65,9 @@ CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 Z
 
 Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，签名必须在它之前完成。签名后脚本用 `Get-AuthenticodeSignature` 要求每个文件状态为 `Valid`，否则 job 失败。macOS 若同时给了公证凭据，Tauri 在 `npm run build` 内完成公证与 stapler。
 
-### 与 release.yml 的关系
+### 发布现状
 
-`tauri.yml` 同时是 `release.yml` 的可复用工作流：打 `v*` tag 时 Electron（`ci.yml`）与 Tauri 并行构建。Tauri 附件默认**不**挂到 GitHub Release，只保留在 Actions 产物里；在仓库设置中新增变量 `COPICK_PUBLISH_TAURI=true` 后，发布步骤会额外上传 `Copick-Tauri-*` 并在 release notes 里加一节「Tauri 重构版（预览）」。关闭时发布步骤会先删掉这些文件再计算 `SHA256SUMS.txt`，避免清单里出现未发布的附件。
-
-失败的影响范围取决于这个变量：
-
-- **默认（变量未设）**：Tauri 构建失败**不会**阻止 Electron 版发布，发布步骤会在 `$GITHUB_STEP_SUMMARY` 里留一行警告。这样尚未真机验证的重构版就无法单独卡死正式发布。
-- **`COPICK_PUBLISH_TAURI=true`**：Tauri 产物是发布内容的一部分，构建失败必须拦住发布（否则 release notes 会写着一堆不存在的附件）。
-- Electron 自身构建失败在任何情况下都阻止发布。
-
-这条规则由 `test/release-decoupling.test.cjs` 锁住，改动 `release.yml` 的 `publish.if` 会让它失败。
+仓库里没有自动创建 GitHub Release 的工作流：`tauri.yml` 只把产物作为 Actions 附件保留 14 天。需要对外发布时，从 Actions 下载附件，按下面的步骤校验，再手工创建 Release。旧 Electron 版的发布流水线已随 `app/` 一并删除。
 
 ## 校验与安装
 
@@ -98,7 +89,7 @@ macOS 解压产品 ZIP，将 `Copick Tauri.app` 拖入“应用程序”。首�
 
 Windows 安装版运行 `Copick-Tauri-Setup-<版本>-win-x64.exe`，按当前用户安装，无需把应用作为管理员长期运行；可通过系统“已安装的应用”卸载。未签名包可能被 SmartScreen 或组织策略拦截，须由用户在确认来源后处理，不能假设所有机器都能直接放行。便携版完整解压到固定目录，保留 NOTICE，与系统 WebView2 一起使用，再运行 `copick-tauri-prototype.exe`。不要从压缩包内直接运行。更新或移动目录前先从托盘退出，移动后检查开机启动项是否需要重新设置。
 
-该 Tauri 应用不和 Electron 共享应用标识，版本升级仍应核对自己的配置、托盘及启动项行为。
+应用标识为 `local.copick.tauri`，版本升级时仍应核对自己的配置、托盘及启动项行为。
 
 ## 可选签名
 

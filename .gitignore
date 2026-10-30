@@ -1,8 +1,5 @@
-dist/
 .DS_Store
 node_modules/
-app/release/
-app/native/foreground/build/
 .tauri-tools/
 tauri-prototype/src-tauri/target/
 tauri-prototype/src-tauri/gen/

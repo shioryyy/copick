@@ -2,40 +2,15 @@ name: Tauri packages
 
 on:
   workflow_dispatch:
-  # release.yml 调用本工作流，让打 tag 时 Tauri 构建与 Electron 构建走同一份步骤。
-  workflow_call:
-    secrets:
-      MAC_CSC_LINK:
-        required: false
-      MAC_CSC_KEY_PASSWORD:
-        required: false
-      MAC_SIGNING_IDENTITY:
-        required: false
-      APPLE_ID:
-        required: false
-      APPLE_APP_SPECIFIC_PASSWORD:
-        required: false
-      APPLE_TEAM_ID:
-        required: false
-      WIN_CSC_LINK:
-        required: false
-      WIN_CSC_KEY_PASSWORD:
-        required: false
   pull_request:
     paths:
       - '.github/workflows/tauri.yml'
       - 'tauri-prototype/**'
-      - 'app/package.json'
-      - 'app/package-lock.json'
-      - 'app/assets/**'
   push:
     branches: [main]
     paths:
       - '.github/workflows/tauri.yml'
       - 'tauri-prototype/**'
-      - 'app/package.json'
-      - 'app/package-lock.json'
-      - 'app/assets/**'
 
 permissions:
   contents: read
@@ -70,9 +45,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            app/package-lock.json
-            tauri-prototype/package-lock.json
+          cache-dependency-path: tauri-prototype/package-lock.json
 
       - name: Verify native runner architecture
         env:
@@ -88,9 +61,6 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install selection-hook source without Electron install scripts
-        run: npm --prefix app ci --ignore-scripts
 
       - name: Install Tauri CLI
         run: npm --prefix tauri-prototype ci

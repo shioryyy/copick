@@ -11,7 +11,7 @@ const path = require('node:path');
 const { prepareReport, readReport } = require('./verification-report.cjs');
 
 const root = path.resolve(__dirname, '..');
-const source = path.resolve(root, '../app/node_modules/selection-hook/src/mac');
+const source = path.resolve(root, 'node_modules/selection-hook/src/mac');
 const mode = process.argv[2];
 const output = path.join(root, 'artifacts', process.argv[3] || `app-${mode}`);
 if (!['textedit', 'safari'].includes(mode)) {

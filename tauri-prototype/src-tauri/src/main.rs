@@ -764,7 +764,7 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "退出 Copick", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&status, &pause, &disable, &separator, &settings, &quit])?;
     #[cfg(target_os = "macos")]
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../../../app/assets/trayTemplate.png"))?;
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../assets/trayTemplate.png"))?;
     #[cfg(target_os = "windows")]
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
     TrayIconBuilder::with_id("copick").icon(icon).icon_as_template(cfg!(target_os = "macos"))

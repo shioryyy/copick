@@ -179,6 +179,8 @@ Windows 引擎的 `GetSelectedText` 接受 stop token，回退可在备份后、
 
 ## Release 流水线与签名（2026-10-26）
 
+> 本节记录的是当时 Electron 与 Tauri 并行发布的状态。此后 Electron 版已删除，`ci.yml`、`release.yml` 与 `COPICK_PUBLISH_TAURI` 一并移除，Tauri 产物只留在 Actions 附件里。
+
 `.github/workflows/tauri.yml` 改为可复用工作流（`workflow_call`，声明 8 个可选 secrets），`release.yml` 随之增加 `tauri` 作业，`publish` 依赖 `[build, tauri]`：打 `v*` tag 时 Electron 与 Tauri 并行构建，任一失败都阻止发布。
 
 ### 签名管线

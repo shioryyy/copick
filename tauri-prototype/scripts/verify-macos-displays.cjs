@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { prepareReport, readReport } = require('./verification-report.cjs');
 const root = path.resolve(__dirname, '..');
-const source = path.resolve(root, '../app/node_modules/selection-hook/src/mac');
+const source = path.resolve(root, 'node_modules/selection-hook/src/mac');
 const output = path.join(root, 'artifacts', process.argv[2] || 'native-displays');
 assert.equal(process.platform, 'darwin', 'Requires a real macOS desktop');
 // 锁屏时前台应用是 loginwindow，来源校验无法放行；先明确拒绝而不是报“定位失败”。

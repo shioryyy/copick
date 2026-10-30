@@ -10,14 +10,13 @@ macOS 首次使用需要在系统设置中授予 Copick Tauri 辅助功能权限
 
 排除列表每行填写一个程序名或 bundle id，按不区分大小写的子字符串匹配；保存时转为小写、去除首尾空白及重复项。最多 200 项，每项最多 128 个字符，不接受路径、通配符和控制字符。列表与诊断开关需保存，也可撤销未保存的更改；开机启动单独登记，系统仍可禁用该启动项，macOS 更改在下次登录时生效。
 
-设置保存在 Tauri 应用标识 `local.copick.tauri` 对应的独立配置目录。首次建立配置时，只读导入 Electron 版的 `paused` 和 `blacklist`，不修改旧版文件，也不导入开机启动项。诊断日志默认关闭，可在设置页开启并打开日志文件夹。
+设置保存在 Tauri 应用标识 `local.copick.tauri` 对应的独立配置目录，与旧 Electron 版互不影响。诊断日志默认关闭，可在设置页开启并打开日志文件夹。
 
 ## 运行与构建
 
-需要 Node.js 22.12+、Rust stable；macOS 需要 Xcode Command Line Tools，Windows 需要 x64 MSVC C++ Build Tools、Windows SDK 和 WebView2。以下命令从仓库根目录执行。`app/` 的依赖提供构建所需的原生源码，无需启动 Electron。
+需要 Node.js 22.12+、Rust stable；macOS 需要 Xcode Command Line Tools，Windows 需要 x64 MSVC C++ Build Tools、Windows SDK 和 WebView2。以下命令从仓库根目录执行。`selection-hook` 的原生源码由本目录自己的依赖提供，构建时不启动任何 Electron 进程。
 
 ```sh
-npm --prefix app ci --ignore-scripts
 npm --prefix tauri-prototype ci
 npm --prefix tauri-prototype run dev
 ```

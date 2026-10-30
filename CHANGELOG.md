@@ -1,11 +1,12 @@
 # 更新日志
 
-格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。发布流程：更新本文件的对应版本小节，把 `app/package.json` 的 `version` 改成同一版本号，推送 `v<版本号>` tag，`.github/workflows/release.yml` 会构建、校验并创建 GitHub Release；版本号含 `-` 的自动标为 Pre-release。
+格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。发布流程：更新本文件的对应版本小节，把 `tauri-prototype/src-tauri/tauri.conf.json` 与 `tauri-prototype/package.json` 的版本改成同一号。仓库目前没有自动创建 GitHub Release 的工作流，产物从 Actions 的 Tauri packages 附件下载，校验与安装见 `tauri-prototype/RELEASE.md`。
 
 ## [Unreleased]
 
 ### 变更
 
+- 移除 Electron 版：`app/`、`docs/`、`build/` 以及 `ci.yml`、`release.yml` 一并删除，Tauri 版成为唯一实现。`selection-hook@2.1.1` 改为 `tauri-prototype` 自己的依赖，原生源码不再从 Electron 的 `node_modules` 取。
 - 设置页按用途分组，支持系统深浅色主题、清晰的权限与保存状态、排除应用列表和一键添加最近取词应用。
 - 复制成功后显示“已复制”约 650 毫秒再隐藏；旧反馈计时器不会关闭新选区的浮窗。
 - 登录后自动启动展示系统生效状态，保留系统禁用选择，并说明待批准及开发模式限制。

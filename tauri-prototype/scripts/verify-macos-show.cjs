@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { prepareReport, readReport } = require('./verification-report.cjs');
 const root = path.resolve(__dirname, '..');
-const source = path.resolve(root, '../app/node_modules/selection-hook/src/mac');
+const source = path.resolve(root, 'node_modules/selection-hook/src/mac');
 const output = path.join(root, 'artifacts', process.argv[2] || `native-show-failure-${Date.now()}`);
 assert.equal(process.platform, 'darwin', 'Requires a real macOS desktop');
 fs.mkdirSync(output, { recursive: true });

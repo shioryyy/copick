@@ -1,15 +1,12 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /app
+    directory: /tauri-prototype
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    groups:
-      electron-builder:
-        patterns: ['electron-builder', 'app-builder-*', '@electron/*']
-    # selection-hook is a native module with a hand-verified contract (see docs/DESIGN.md);
-    # bump it deliberately, not automatically.
+    # selection-hook is a native module with a hand-verified contract (see
+    # tauri-prototype/COMPATIBILITY.md); bump it deliberately, not automatically.
     ignore:
       - dependency-name: selection-hook
   - package-ecosystem: github-actions
