@@ -1,12 +1,12 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /tauri-prototype
+    directory: /app
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     # selection-hook is a native module with a hand-verified contract (see
-    # tauri-prototype/COMPATIBILITY.md); bump it deliberately, not automatically.
+    # app/COMPATIBILITY.md); bump it deliberately, not automatically.
     ignore:
       - dependency-name: selection-hook
   - package-ecosystem: github-actions

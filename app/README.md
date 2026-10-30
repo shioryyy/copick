@@ -17,17 +17,17 @@ macOS 首次使用需要在系统设置中授予 Copick Tauri 辅助功能权限
 需要 Node.js 22.12+、Rust stable；macOS 需要 Xcode Command Line Tools，Windows 需要 x64 MSVC C++ Build Tools、Windows SDK 和 WebView2。以下命令从仓库根目录执行。`selection-hook` 的原生源码由本目录自己的依赖提供，构建时不启动任何 Electron 进程。
 
 ```sh
-npm --prefix tauri-prototype ci
-npm --prefix tauri-prototype run dev
+npm --prefix app ci
+npm --prefix app run dev
 ```
 
 检查、测试、构建和打包：
 
 ```sh
-npm --prefix tauri-prototype run check
-npm --prefix tauri-prototype test
-npm --prefix tauri-prototype run build
-npm --prefix tauri-prototype run package
+npm --prefix app run check
+npm --prefix app test
+npm --prefix app run build
+npm --prefix app run package
 ```
 
 `package` 需在 `build` 成功后运行。平台产物、安装方式、签名及发布步骤见 [RELEASE.md](RELEASE.md)。

@@ -5,7 +5,7 @@ fn main() {
     assert!(platform == "macos" || platform == "windows", "原型仅支持 macOS 和 Windows");
     let package = PathBuf::from("../node_modules/selection-hook");
     let metadata: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(package.join("package.json")).expect("请先在 tauri-prototype/ 执行 npm ci"),
+        &std::fs::read_to_string(package.join("package.json")).expect("请先在 app/ 执行 npm ci"),
     ).expect("无法读取 selection-hook 元数据");
     assert_eq!(metadata["version"], "2.1.1", "原型仅验证过 selection-hook 2.1.1");
     let source = package.join(if platform == "macos" { "src/mac" } else { "src/windows" });

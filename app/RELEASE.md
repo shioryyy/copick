@@ -9,17 +9,17 @@
 - macOS：Apple Silicon（arm64），Xcode Command Line Tools，Node.js 22.12+，Rust stable；应用配置的最低系统版本为 macOS 12.0，实际兼容性需在目标系统确认。使用系统 WKWebView，无需随包分发 WebView。
 - Windows：x64 Windows，Visual Studio 2022 C++ Build Tools / Windows SDK，x64 MSVC Rust stable，Node.js 22.12+。原生编译与 C++ 单元测试必须在 x64 Developer PowerShell 中执行；仅安装 MSVC 而没有加载开发环境会导致 `cl` 不可用。
 - Windows 运行需要系统安装 **Microsoft Edge WebView2 Evergreen Runtime**。便携 ZIP 不包含该运行时，应提前从微软官方渠道安装；NSIS 在缺少运行时时下载引导程序，因此首次安装可能需要网络及组织策略允许。当前不提供离线 WebView2 安装包。CI 的 smoke test 不创建 WebView，不能证明目标机器具备 WebView2。
-- `selection-hook@2.1.1` 的原生源码由 `tauri-prototype/package-lock.json` 固定，`build.rs` 直接从 `tauri-prototype/node_modules/selection-hook` 编译。装依赖时用 `--ignore-scripts`，避免执行该包自带的 native 重建脚本。
+- `selection-hook@2.1.1` 的原生源码由 `app/package-lock.json` 固定，`build.rs` 直接从 `app/node_modules/selection-hook` 编译。装依赖时用 `--ignore-scripts`，避免执行该包自带的 native 重建脚本。
 
 ## 手动构建
 
 以下命令从仓库根目录执行，不需要启动 Electron。
 
 ```sh
-npm --prefix tauri-prototype ci
-npm --prefix tauri-prototype test
-npm --prefix tauri-prototype run build
-npm --prefix tauri-prototype run package
+npm --prefix app ci
+npm --prefix app test
+npm --prefix app run build
+npm --prefix app run package
 ```
 
 Windows 在已加载 x64 MSVC 环境的 Developer PowerShell 中执行相同命令。可先检查：
@@ -35,7 +35,7 @@ rustc -vV
 
 `npm run package` **不会自动编译**，必须在成功 build 后运行。打包器先检查必要文件，再运行实际 `.app` 中或 Windows 便携暂存目录中的可执行文件，带 `--smoke-test`，要求退出码为 0 且标准输出是含 `"ok": true` 的 JSON。`permission` 可以为 false，CI 不请求辅助功能授权、不启动正常 UI、不安装 NSIS。macOS 使用 `/usr/bin/ditto` 保留 `.app` 结构和资源；Windows 使用 PowerShell `Compress-Archive`，路径通过环境变量传入，不拼接到 PowerShell 源码。
 
-成功后，`tauri-prototype/artifacts/release/` 只包含当前平台文件（下表以版本 0.1.0 为例）：
+成功后，`app/artifacts/release/` 只包含当前平台文件（下表以版本 0.1.0 为例）：
 
 | 平台 | 文件 | 内容 |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ rustc -vV
 
 ## 独立 CI
 
-`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`，以及 main push / PR 的 Tauri 路径变化；`.github/workflows/tauri.yml` 与 `tauri-prototype/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
+`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`，以及 main push / PR 的 Tauri 路径变化；`.github/workflows/tauri.yml` 与 `app/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
 
 CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。
 
@@ -100,8 +100,8 @@ macOS 如需可信签名，可在受控构建环境配置 Tauri 原生支持的 
 Windows 可在受控机器的证书存储安装代码签名证书，通过额外的 Tauri JSON 配置设置 `bundle.windows.certificateThumbprint`、`digestAlgorithm` 和时间戳 URL。如把该外部配置文件路径存于用户自定的 `COPICK_TAURI_SIGNING_CONFIG` 环境变量，Developer PowerShell 构建命令为：
 
 ```powershell
-npm --prefix tauri-prototype run build -- --config $env:COPICK_TAURI_SIGNING_CONFIG
-npm --prefix tauri-prototype run package
+npm --prefix app run build -- --config $env:COPICK_TAURI_SIGNING_CONFIG
+npm --prefix app run package
 ```
 
 此覆盖文件只应配置签名，不覆盖产品名、版本、目标和资源。构建后对便携 EXE 和 NSIS EXE 分别用 `Get-AuthenticodeSignature` 确认签名与时间戳；若自行签名，也必须在 `npm run package` 前完成，从而让 SHA-256 对应最终内容。
@@ -113,8 +113,8 @@ CI 的签名走上一节的 secrets 与 `signtool`，不使用这份覆盖配置
 脚本的基本静态检查：
 
 ```sh
-node --check tauri-prototype/scripts/tauri.cjs
-node --check tauri-prototype/scripts/package.cjs
+node --check app/scripts/tauri.cjs
+node --check app/scripts/package.cjs
 ```
 
 CI 的 `npm test` 包含现有 JavaScript、C++ helper 和 Rust 测试；build 与 smoke test 验证实际原生产物可执行、NOTICE 齐全及归档成功。NSIS 本身不会在 CI 执行。历史真实桌面证据及边界见 [VALIDATION.md](VALIDATION.md)，不能将旧版 EXE 测试结果直接当作当前安装包验收。
