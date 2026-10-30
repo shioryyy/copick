@@ -59,6 +59,8 @@ struct NativeSelection {
     method: i32,
     /// 小写程序标识（Windows 可执行文件名或 macOS bundle id），NUL 结尾。
     program: *const c_char,
+    /// 失败原因，对应 `Failure`。0 表示成功。
+    failure: i32,
 }
 extern "C" {
     fn cp_permission(prompt: bool) -> bool;
@@ -114,33 +116,47 @@ extern "C" fn input(event: InputEvent) {
 }
 
 struct Captured { text: String, pid: i32, window: u64, x: f64, y: f64, method: i32, program: String }
+/// 原生侧失败原因，与 `bridge_win.cc` 的 `FailureCode` 一一对应。
+#[derive(Clone, Copy, PartialEq)]
+enum Failure { None, NoText, NonText, Filtered }
+impl Failure {
+    fn from_code(code: i32) -> Failure {
+        match code { 2 => Failure::NonText, 3 => Failure::Filtered, _ => Failure::NoText }
+    }
+}
+/// 一次取词回执的全部内容：成功时带文字，失败时带程序名与原因。
+struct CaptureReply { value: Option<Captured>, program: String, failure: Failure }
 enum Completion {
     // arrived 是回执到达回调线程的时刻，不是主线程处理它的时刻。主线程
     // 可能因为别的工作晚到几十毫秒，不能把“已经收到的成功”当成超时丢弃。
-    Capture { request_id: u64, value: Option<Captured>, arrived: Instant },
+    Capture { request_id: u64, reply: CaptureReply, arrived: Instant },
     Copy { request_id: u64, result: Result<bool, String>, arrived: Instant },
 }
 
 extern "C" fn capture_complete(request_id: u64, value: *const NativeSelection) {
-    let captured = if value.is_null() { None } else {
+    let reply = if value.is_null() {
+        // macOS 失败时不回调结构：没有程序名可报，也就没有提示。
+        CaptureReply { value: None, program: String::new(), failure: Failure::None }
+    } else {
         unsafe {
             let value = &*value;
-            if value.text.is_null() || value.length == 0 || value.length > 1024 * 1024 { None }
-            else {
-                let bytes = std::slice::from_raw_parts(value.text.cast::<u8>(), value.length);
-                // 程序标识只用于托盘文案与排除项，缺失时按空字符串处理；
-                // 原生侧保证指针在本回调返回前有效。
-                let program = if value.program.is_null() { String::new() }
-                    else { CStr::from_ptr(value.program).to_string_lossy().into_owned() };
-                std::str::from_utf8(bytes).ok().map(|text| Captured {
-                    text: text.to_owned(), pid: value.pid, window: value.window,
-                    x: value.x, y: value.y, method: value.method, program,
-                })
-            }
+            // 程序标识只用于托盘文案与排除项，缺失时按空字符串处理；
+            // 原生侧保证指针在本回调返回前有效。
+            let program = if value.program.is_null() { String::new() }
+                else { CStr::from_ptr(value.program).to_string_lossy().into_owned() };
+            let text = if value.text.is_null() || value.length == 0 || value.length > 1024 * 1024 { None }
+                else { std::str::from_utf8(std::slice::from_raw_parts(value.text.cast::<u8>(), value.length)).ok() };
+            let captured = text.map(|text| Captured {
+                text: text.to_owned(), pid: value.pid, window: value.window,
+                x: value.x, y: value.y, method: value.method, program: program.clone(),
+            });
+            // 原生说成功却没有可用文字（编码失败或空选区）时按“没取到文字”处理。
+            let failure = if captured.is_some() { Failure::None } else { Failure::from_code(value.failure) };
+            CaptureReply { value: captured, program, failure }
         }
     };
     if let Some(sender) = COMPLETIONS.get() {
-        if sender.try_send(Completion::Capture { request_id, value: captured, arrived: Instant::now() }).is_err() { COMPLETION_OVERFLOW.store(true, Ordering::Release); }
+        if sender.try_send(Completion::Capture { request_id, reply, arrived: Instant::now() }).is_err() { COMPLETION_OVERFLOW.store(true, Ordering::Release); }
     }
 }
 
@@ -191,12 +207,24 @@ struct State {
     excluded: Vec<String>,
     /// 设置页有未保存草稿或正在保存时为 true，关闭窗口前需要确认。
     draft_dirty: bool,
+    /// 最近一次取词失败。默认关闭的回退只有这样才不会被当成“软件坏了”。
+    last_failure: Option<CaptureFailure>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureFailure {
+    /// 程序显示名，与托盘一致；未知程序就是可执行文件名本身。
+    program: String,
+    /// `no_text`（无障碍没取到文字）、`non_text`（选中的不是文字）、
+    /// `fallback_failed`（回退已开启仍未取到）。
+    reason: &'static str,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Status {
     permission: bool, running: bool, paused: bool, fallback: bool,
     selections: u64, presented: u64, copies: u64, focus_preserved: Option<bool>, error: Option<String>,
+    last_failure: Option<CaptureFailure>,
 }
 #[derive(Serialize)]
 struct PopupState { token: Option<String>, copying: bool, copied: bool }
@@ -243,7 +271,8 @@ fn invalidate(app: &tauri::AppHandle, state: &mut State, reason: &str) {
 fn snapshot(state: &State) -> Status {
     Status { permission: state.permission, running: state.running, paused: state.paused,
         fallback: state.fallback, selections: state.selections, presented: state.presented,
-        copies: state.copies, focus_preserved: state.focus_preserved, error: state.error.clone() }
+        copies: state.copies, focus_preserved: state.focus_preserved, error: state.error.clone(),
+        last_failure: state.last_failure.clone() }
 }
 fn refresh(app: &tauri::AppHandle, state: &mut State) {
     state.permission = unsafe { cp_permission(false) };
@@ -277,13 +306,41 @@ fn cursor_far_from(x: f64, y: f64) -> bool {
     let (mut cursor_x, mut cursor_y) = (0.0, 0.0);
     (unsafe { cp_cursor_position(&mut cursor_x, &mut cursor_y) }) && cursor_exceeded((x, y), (cursor_x, cursor_y))
 }
-fn accept_capture(app: &tauri::AppHandle, state: &mut State, request_id: u64, value: Option<Captured>, arrived: Instant) {
+/// 记录最近一次取词失败，供设置页提示。只保留程序名与固定枚举的原因，
+/// 不记录窗口标题、路径或选中文字。
+fn note_failure(state: &mut State, request_id: u64, reply: &CaptureReply) {
+    let program = reply.program.trim().to_lowercase();
+    // 取不到程序名，或被程序名过滤（终端、密码管理器、用户排除项）时不提示：
+    // 过滤是用户自己的选择，报成故障会误导他去开回退。
+    if program.is_empty() {
+        trace!("COPICK_CAPTURE_EMPTY request={} reason=unknown program=unknown", request_id);
+        return;
+    }
+    if reply.failure == Failure::Filtered {
+        trace!("COPICK_CAPTURE_EMPTY request={} reason=filtered program={}",
+            request_id, diagnostics::program_token(&program));
+        return;
+    }
+    let reason = if reply.failure == Failure::NonText { "non_text" }
+        else if state.fallback { "fallback_failed" } else { "no_text" };
+    // 日志只写压缩后的程序 token；设置页展示的是与托盘一致的易读名称。
+    trace!("COPICK_CAPTURE_EMPTY request={} reason={} program={}",
+        request_id, reason, diagnostics::program_token(&program));
+    state.last_failure = Some(CaptureFailure {
+        program: program_names::display_name(&program).to_string(), reason });
+}
+fn accept_capture(app: &tauri::AppHandle, state: &mut State, request_id: u64, reply: CaptureReply, arrived: Instant) {
     let Some(flight) = state.capture.as_ref() else { return; };
     if !state.running || !flight.accepts(request_id, state.generation, arrived) { return; }
     if !unsafe { cp_source_matches(flight.source.source_pid, flight.source.source_window) } { invalidate(app, state, "capture_source_changed"); return; }
     let release_point = (flight.source.x, flight.source.y);
     state.capture = None;
-    let Some(value) = value else { trace!("COPICK_CAPTURE_EMPTY request={}", request_id); return; };
+    let Some(value) = reply.value else {
+        note_failure(state, request_id, &reply);
+        return;
+    };
+    // 来源已变或被选中的只是空白时不记为失败：前者不是这个应用的取词结果，
+    // 后者提示用户“开启回退”也没有用。
     if !unsafe { cp_source_matches(value.pid, value.window) } || value.text.trim().is_empty() { return; }
     // 慢结果到达时指针可能已经离开选区；此时浮窗会弹在用户正在操作的位置。
     // 与 Electron 版一致以鼠标松开点为基准，而不是选区末行（向上拖选时两者相距很远）。
@@ -292,6 +349,7 @@ fn accept_capture(app: &tauri::AppHandle, state: &mut State, request_id: u64, va
     state.serial = state.serial.wrapping_add(1);
     state.selections += 1;
     state.last_program = value.program.clone();
+    state.last_failure = None;
     update_tray(app, state);
     let token = uuid::Uuid::new_v4().to_string();
     let script = format!("window.copickSelection({});", serde_json::to_string(&token).unwrap());
@@ -363,7 +421,7 @@ fn tick(app: &tauri::AppHandle, queued: Option<QueuedInput>) {
     // 主线程刚好在截止时间之后才轮到它，被当成“超时”丢弃并报告失败。
     for completion in drain_completions() {
         match completion {
-            Completion::Capture { request_id, value, arrived } => accept_capture(app, &mut state, request_id, value, arrived),
+            Completion::Capture { request_id, reply, arrived } => accept_capture(app, &mut state, request_id, reply, arrived),
             Completion::Copy { request_id, result, arrived } => finish_copy(app, &mut state, request_id, result, arrived),
         }
     }
@@ -957,6 +1015,26 @@ mod tests {
         assert_eq!(tray_labels(&running), ("正在监听", "暂停监听"));
         let stopped = State { permission: true, error: Some("x".into()), ..State::default() };
         assert_eq!(tray_labels(&stopped).0, "监听异常，请打开设置");
+    }
+
+    #[test]
+    fn capture_failure_records_program_and_reason_but_ignores_filtering() {
+        let mut state = State::default();
+        let reply = |failure, program: &str| CaptureReply { value: None, program: program.into(), failure };
+        let recorded = |state: &State| state.last_failure.as_ref().map(|failure| (failure.program.clone(), failure.reason));
+        note_failure(&mut state, 1, &reply(Failure::NoText, "Excel.EXE"));
+        assert_eq!(recorded(&state), Some(("Excel".into(), "no_text")));
+        // 回退已开启仍然取不到时，原因要指向“回退也失败了”，不能继续劝用户去开回退。
+        state.fallback = true;
+        note_failure(&mut state, 2, &reply(Failure::NoText, "excel.exe"));
+        assert_eq!(recorded(&state), Some(("Excel".into(), "fallback_failed")));
+        note_failure(&mut state, 3, &reply(Failure::NonText, "winword.exe"));
+        assert_eq!(recorded(&state), Some(("Word".into(), "non_text")));
+        // 程序名过滤（终端、密码管理器、用户排除项）和取不到程序名都不算故障，
+        // 也不覆盖已经记下的提示。
+        note_failure(&mut state, 4, &reply(Failure::Filtered, "cmd.exe"));
+        note_failure(&mut state, 5, &reply(Failure::NoText, ""));
+        assert_eq!(recorded(&state), Some(("Word".into(), "non_text")));
     }
 
     #[test]

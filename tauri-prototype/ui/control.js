@@ -4,6 +4,7 @@ const model = window.CopickSettings;
 const elements = Object.fromEntries([
   'status', 'permission', 'pause', 'connection-error', 'listener-error',
   'settings-form', 'startup', 'startup-hint', 'startup-error', 'clipboard-fallback', 'fallback-hint',
+  'last-failure-row', 'last-failure', 'last-failure-action',
   'excluded-apps',
   'exclusions-hint', 'exclusions-error', 'diagnostics', 'config-error', 'version',
   'save', 'revert', 'reload-settings', 'settings-message', 'settings-action-error',
@@ -51,6 +52,26 @@ function syncDraftDirty(value) {
   // 发送失败时回退标记，下一次界面更新会重试。
   invoke('set_draft_dirty', { dirty: value }).catch(() => { lastDirty = !value; });
 }
+const FAILURE_REASONS = ['no_text', 'non_text', 'fallback_failed'];
+// 回退默认关闭时，失败不会留下任何可见痕迹，用户只会觉得软件坏了。
+// 这里把最近一次失败原样摊在回退开关下面，必要时再给一个直达开关的入口。
+function failureText(failure) {
+  const name = failure.program || '未知应用';
+  if (failure.reason === 'non_text') return `最近一次取词失败：${name}（选中的不是文字，回退也读取不了）。`;
+  if (failure.reason === 'fallback_failed') return `最近一次取词失败：${name}（已开启兼容复制回退，仍未取到文字）。`;
+  return `最近一次取词失败：${name}（没有取到文字）。`;
+}
+function renderFailure() {
+  const failure = latestStatus ? latestStatus.lastFailure : null;
+  elements['last-failure-row'].hidden = !failure;
+  elements['last-failure'].textContent = failure ? failureText(failure) : '';
+  // 只有“没取到文字”才值得建议开启回退：选中对象、或回退已经开着又失败时，
+  // 再点一次开关不会有任何帮助。
+  const actionable = Boolean(failure) && failure.reason === 'no_text' && Boolean(settingsInfo) &&
+    settingsInfo.fallbackAvailable && !elements['clipboard-fallback'].checked;
+  elements['last-failure-action'].hidden = !actionable;
+  elements['last-failure-action'].disabled = !savedConfig || settingsPending;
+}
 function updateSettingsControls() {
   let validationError = '';
   if (savedConfig) {
@@ -75,6 +96,7 @@ function updateSettingsControls() {
     : !savedConfig ? '设置未加载。' : changed ? '有未保存的更改。'
       : settingsInfo.configError ? '修正设置后可保存，重新建立配置文件。' : settingsNotice || '设置已同步。';
   elements.quit.disabled = appPending || settingsPending;
+  renderFailure();
 }
 function restoreDraft() {
   elements['excluded-apps'].value = savedConfig.excludedApps.join('\n');
@@ -86,7 +108,7 @@ function renderSettingsInfo(info) {
   elements.startup.checked = info.startupEnabled;
   // 回退属于草稿的一部分，只在加载、保存和撤销时同步，不能被开机启动等即时保存覆盖。
   elements['fallback-hint'].textContent = info.fallbackAvailable
-    ? '无障碍取词失败时模拟复制快捷键读取选区。会临时改动剪贴板；私有格式、并发复制或剪贴板管理器可能无法完整恢复。'
+    ? '默认关闭。开启后，无障碍取词失败时会模拟复制快捷键读取选区；这会临时改动剪贴板，私有格式、并发复制或剪贴板管理器可能无法完整恢复，在终端里还可能触发 Ctrl+C。'
     : '当前平台的回退无法在事务内取消，因此始终关闭。';
   elements['startup-hint'].textContent = info.startupAvailable
     ? (typeof info.startupNote === 'string' && info.startupNote
@@ -167,8 +189,11 @@ function updateListenerControls() {
   elements.pause.disabled = listenerPending || !latestStatus;
 }
 function renderStatus(state) {
+  const failure = state ? state.lastFailure : null;
   if (!state || !['permission', 'running', 'paused', 'fallback'].every(key => typeof state[key] === 'boolean') ||
-      !(state.error === null || typeof state.error === 'string')) {
+      !(state.error === null || typeof state.error === 'string') ||
+      !(failure === null || (typeof failure === 'object' && typeof failure.program === 'string' &&
+        FAILURE_REASONS.includes(failure.reason)))) {
     throw new Error('监听状态响应格式不正确。');
   }
   latestStatus = state;
@@ -180,6 +205,7 @@ function renderStatus(state) {
   elements.pause.textContent = state.paused ? '恢复监听' : '暂停监听';
   message('connection-error', '');
   updateListenerControls();
+  renderFailure();
 }
 async function pollStatus() {
   if (statusPending || listenerPending) return;
@@ -282,6 +308,15 @@ elements.pause.addEventListener('click', () => {
 elements['settings-form'].addEventListener('submit', saveSettings);
 elements['reload-settings'].addEventListener('click', loadSettings);
 elements.startup.addEventListener('change', changeStartup);
+// 「启用兼容复制回退」等价于勾选开关并保存：用户已经被告知会临时改动剪贴板，
+// 不再让他自己去找保存按钮。
+elements['last-failure-action'].addEventListener('click', () => {
+  if (!savedConfig || settingsPending) return;
+  settingsNotice = '';
+  elements['clipboard-fallback'].checked = true;
+  updateSettingsControls();
+  elements['settings-form'].requestSubmit();
+});
 elements.revert.addEventListener('click', () => {
   if (!savedConfig || settingsPending) return;
   restoreDraft();

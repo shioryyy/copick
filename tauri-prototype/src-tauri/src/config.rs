@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
-/// Windows 引擎的剪贴板回退接受事务内取消令牌，可在发送快捷键前停止并恢复备份，
-/// 因此默认开启以覆盖只有回退才能取词的应用（Excel、PDF 阅读器、微信、资源管理器）。
-/// macOS 引擎没有该令牌，回退无法在事务内取消，保持关闭。
-fn default_clipboard_fallback() -> bool { cfg!(target_os = "windows") }
+/// 剪贴板回退默认关闭。
+///
+/// 它要先合成 Ctrl+C 读剪贴板再恢复原内容，会短暂改写系统剪贴板（剪贴板管理器、
+/// 云同步和历史记录都可能看到），恢复对 GDI 句柄、私有格式和延迟渲染格式也只能
+/// 尽力而为；合成快捷键在终端里还是 SIGINT。无障碍路径（UIA/MSAA）能覆盖主流
+/// 应用后，这条路径只在长尾里才有收益，因此改为显式开启。
+fn default_clipboard_fallback() -> bool { false }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -103,14 +106,16 @@ mod tests {
         }
     }
     #[test]
-    fn clipboard_fallback_defaults_to_windows_and_is_forced_off_elsewhere() {
-        assert_eq!(Config::default().clipboard_fallback, cfg!(target_os = "windows"));
-        let requested = Config { clipboard_fallback: true, ..Config::default() }.validate().unwrap();
-        assert_eq!(requested.clipboard_fallback, cfg!(target_os = "windows"));
-        // 缺少该字段的旧版 Tauri 配置按平台默认值读取，不因缺字段而闭锁。
+    fn clipboard_fallback_is_opt_in_and_forced_off_on_macos() {
+        // 默认关闭：无障碍路径能覆盖的应用不必让选区经过系统剪贴板。
+        assert!(!Config::default().clipboard_fallback);
+        // 缺字段的旧配置同样按关闭读取，不会因为升级而突然开始合成快捷键。
         let parsed: Config = serde_json::from_str(
             r#"{"version":1,"excludedApps":[],"diagnosticsEnabled":false}"#).unwrap();
-        assert_eq!(parsed.clipboard_fallback, cfg!(target_os = "windows"));
+        assert!(!parsed.clipboard_fallback);
+        // 显式开启在 Windows 上保留，macOS 没有可取消的回退路径，仍强制关闭。
+        let requested = Config { clipboard_fallback: true, ..Config::default() }.validate().unwrap();
+        assert_eq!(requested.clipboard_fallback, cfg!(target_os = "windows"));
     }
     #[test]
     fn corrupt_file_is_preserved_and_failed_save_keeps_current_config() {

@@ -40,20 +40,22 @@
 
 `npm run verify:mac-textedit` / `npm run verify:mac-safari`。
 
-## 兼容复制回退默认策略（2026-10-26）
+## 兼容复制回退默认策略
 
-本轮改变回退策略并做了两平台验证。Windows 引擎的 `GetSelectedText` 接受 stop token，回退可在备份后、发送快捷键前和轮询中取消并恢复备份；macOS 引擎没有该参数，回退无法在事务内取消。因此：
+Windows 引擎的 `GetSelectedText` 接受 stop token，回退可在备份后、发送快捷键前和轮询中取消并恢复备份；macOS 引擎没有该参数，回退无法在事务内取消。
+
+2026-10-28 起 Windows 也改为默认关闭。理由是无障碍路径换上 `CUIAutomation8` 后覆盖了此前唯一确知需要回退的 WinUI 记事本（见下文产品级验证），而回退要短暂改写系统剪贴板、恢复对私有格式只能尽力而为，并且在终端里合成的 `Ctrl+C` 是 SIGINT。需要长尾应用的用户可以在设置里显式开启。
 
 | 平台 | 默认 | 设置页 | 配置层 |
 |---|---|---|---|
-| Windows | 开启 | 可关闭，说明会临时改动剪贴板 | `Config::default` 与反序列化缺省均为 true |
+| Windows | 关闭 | 可开启，说明会临时改动剪贴板且可能触发 Ctrl+C | `Config::default` 与反序列化缺省均为 false |
 | macOS | 关闭 | 禁用并说明「无法在事务内取消」 | `validate()` 强制改回 false，忽略旧配置或导入的开启意图 |
 
 2026-10-27 起不再读取 Electron 版的配置文件：本项目只有作者一个使用者，旧版迁移的代码与「已导入设置」提示一并删除，两个版本各自独立。
 
 ### 自动检查
 
-本机 macOS 与 OMEN（Windows 11 x64 build 26200）均通过 `npm test`：48 条 Node 测试、20 条 Rust 测试。新增的 Rust 测试锁定 Windows 默认开启、macOS 强制关闭。
+本机 macOS 通过 `npm test`：86 条 Node 测试、24 条 Rust 测试（OMEN 侧本轮只做构建与真机验证，没重跑依赖 MSVC 的原生探针）。配置测试锁定回退默认关闭、缺字段的旧配置按关闭读取，macOS 侧仍强制关闭。
 
 ### Windows 真机（OMEN，交互式桌面会话）
 
@@ -62,9 +64,11 @@
 | 场景 | 次数 | 结果 | 证据 |
 |---|---:|---|---|
 | `fallback`（仅支持复制的自绘控件） | 6 | 全部通过 | `method=99`，`clipboardRestoredBeforeClick=true`，点击后文本正确、焦点与选区保留，守护进程 `restoredVerified` |
-| 无配置文件启动 | 2 | 全部通过 | 缺省值直接落到回退，`method=99` |
+| 无配置文件启动 | 2 | 全部通过 | 当时缺省值直接落到回退，`method=99` |
 | `fallback-disabled` | 1 | 通过 | 无浮窗，`copyShortcutCount=0`，剪贴板内容与序列号均未变 |
-| `double` / `drag` | 各 1 | 通过 | `method=1`，默认开启回退没有抢占 UIA 路径 |
+| `double` / `drag` | 各 1 | 通过 | `method=1`，回退开启时也没有抢占 UIA 路径 |
+
+上表测的是 2026-10-26 回退默认开启时的构建。改为默认关闭后，最终构建上重跑了 `fallback`（显式开启，6/6 通过）与 `fallback-disabled`（无浮窗、`copyShortcutCount=0`）；`double`、`drag` 与「无配置文件启动」没有在最终构建上重跑。
 
 ### 夹具与脚本修正
 
@@ -235,11 +239,11 @@ bb50a522…  Copick-Tauri-0.1.0-win-x64.zip
 
 新增 `COMPATIBILITY.md` 记录 Tauri 版自己的矩阵，不继承 Electron 的结论；配套脚本 `scripts/verify-windows-apps.ps1` + `.cs` 对**真实应用**做拖选、找浮窗、点击、读剪贴板、等浮窗隐藏。记事本与 Edge 各跑两轮（先关闭回退测无障碍，再开回退测可用性），终端只跑一轮并要求日志里没有选区请求。
 
-| 目标 | 取词（回退关闭） | 回退（默认） | 结论 |
+| 目标 | 取词（回退关闭） | 回退（显式开启） | 结论 |
 |---|---|---|---|
-| Edge 本地 HTML | ✅ `method=1` | ✅ `method=1` | 正值对照，证明夹具能观察到 UIA 成功；浮窗 `780,229 88x40`，复制内容一致 |
-| Windows 11 记事本 | ❌ `COPICK_CAPTURE_EMPTY` ×5 | ✅ `method=99` | WinUI 记事本取不到文本，回退可用；与 Electron 2026-10-18 的「记事本 UIA ✅」不一致，疑为经典记事本与 WinUI 版的差别 |
-| cmd 控制台 | 应不触发 ✅ | 应不触发 ✅ | 日志无 `COPICK_SELECTION_RECEIVED`，终端全局过滤生效 |
+| Edge 本地 HTML | ⚠️ `method=1` | ⚠️ `method=1` | 历史观察：浮窗 `780,229 88x40`；旧判据不能证明复制内容与实际选区精确一致，待复测 |
+| Windows 11 记事本 | ❌ `COPICK_CAPTURE_EMPTY` ×5 | ⚠️ `method=99` | 本轮直取报空；回退为历史观察，精确选区待复测。与 Electron 2026-10-18 的「记事本 UIA ✅」不一致，经典版与 WinUI 版差异只是待验证假设 |
+| cmd 控制台 | ⚠️ 不确定 | ⚠️ 不确定 | 日志无 `COPICK_SELECTION_RECEIVED`，但未确认拖选成功，不能证明终端全局过滤生效 |
 
 夹具踩到并修掉的三个坑：
 
@@ -253,13 +257,13 @@ macOS 侧本轮没有任何应用级结果：验证时桌面锁屏，见上一�
 
 在 Tauri 版上把矩阵扩到五个场景并复跑，同时补掉了驱动里一串会**静默误报通过**的缺陷。这一轮最重要的产出不是"又绿了几个应用"，而是：上一版判定只看"浮窗出现了吗"，而浮窗出现在错误位置（比如 Edge 的地址栏）同样会通过。
 
-| 目标 | 取词（回退关闭） | 回退（默认） | 结论 |
+| 目标 | 取词（回退关闭） | 回退（显式开启） | 结论 |
 |---|---|---|---|
 | Edge 本地 HTML | ✅ `method=1` | ✅ `method=1` | 复制内容与选区一致 |
 | Word | ✅ `method=1` | ✅ `method=1` | 打开导航窗格、停在文档视图时拖选，复制内容正确 |
 | Windows 11 记事本 | ❌ `COPICK_CAPTURE_EMPTY` | ✅ `method=99` | 同一次拖选里驱动用 UIA `TextPattern.GetSelection()` 读得到正确文字，产品却返回空——收窄了上一轮"疑为 WinUI 版差别"的猜测：**UIA 树有内容，是产品这条路径拿不到** |
 | cmd 控制台 | 应不触发 ✅ | 应不触发 ✅ | 日志无 `COPICK_SELECTION_RECEIVED` |
-| VS Code | ❌ UIA 读不到 Monaco 选区 | 禁用（`NoClipboardPrograms`） | 已开 `editor.accessibilitySupport=on` 并加 `--force-renderer-accessibility`，UIA 仍返回空串。驱动与产品都读不到，是编辑器侧限制，与 Electron 版同为 UIA-only 策略 |
+| VS Code | ❌ UIA 读不到 Monaco 选区 | 禁用（`NoClipboardPrograms`） | 已开 `editor.accessibilitySupport=on` 并加 `--force-renderer-accessibility`，UIA 仍返回空串，驱动与产品都读不到。2026-10-28 用同样参数复测却取到了词，见下文 |
 
 驱动修掉的问题（每一条都已写进 `test/app-matrix-script.test.cjs`）：
 
@@ -271,6 +275,73 @@ macOS 侧本轮没有任何应用级结果：验证时桌面锁屏，见上一�
 6. **编译失败必须中止**。有一次缺 `WindowsBase` 引用编译失败，脚本继续用上一次的旧 exe 跑，报告字段和源码完全对不上。
 
 驱动同时会写诊断字段：`contentLocated`/`contentRect`、`selectionProbe`、`selectionMadeWithoutPopup`、`uiaSelection`、`clipboardLatencyMs`，失败时还会截一张窗口图，下次排查不用再靠猜。
+
+## 记事本 UIA8 产品级验证（2026-10-28）
+
+同一份源码构建两次，`COPICK_WINDOWS_UIA_MODE` 分别是 `legacy` 和 `notepad`，各自在 OMEN 交互桌面启动真实产品、打开同一个临时记事本文档并拖选。两轮都设 `clipboardFallback=false`，排除剪贴板回退混入结果。
+
+| 构建 | 拖选次数 | 结果 | trace |
+|---|---|---|---|
+| `legacy` | 9 | 全部失败，浮窗不出现 | 9× `COPICK_CAPTURE_EMPTY` |
+| `notepad` | 1 | 成功，浮窗出现并复制 | `COPICK_SELECTION_RECEIVED`、`COPICK_POPUP_PRESENTED method=1` |
+
+随后把范围扩到五个应用，每个都用同源码构建的 legacy 与严格 UIA8 各跑一次：
+
+| 应用 | legacy | UIA8 |
+|---|---|---|
+| 记事本 | ❌ 9 次 `CAPTURE_EMPTY` | ✅ `method=1` |
+| Edge | ✅ `method=1` | ✅ `method=1` |
+| Word | ✅ `method=1` | ✅ `method=1` |
+| VS Code | ✅ `method=1`（第 22 次尝试命中） | ✅ `method=1`（同样第 22 次） |
+| cmd | 未测 | ⚠️ 无浮窗（未证明终端里确实选中了文字） |
+
+驱动对每个应用都会从多个固定偏移反复拖选，直到命中正文行，所以「尝试了 22 次」不代表取词失败。记事本以外的四个应用在两种客户端下表现一致，说明换客户端没有引入回归。
+
+`method=1` 来自 UIA 直取。复制到的文本是 `pick UIA8 probe line two`，缺失前半截是因为驱动从行中间起拖，不是取词缺陷。
+
+这解释了 WinUI 记事本的 `CAPTURE_EMPTY`：`CUIAutomation` 下 `GetFocusedElement` 拿到的是 `Edit`，`GetCurrentPatternAs` 返回 `S_OK` 但指针为空；`CUIAutomation8` 下焦点是 `Document`，`TextPattern` 可读。
+
+### 改为单一 UIA8 客户端后的复测（2026-10-28）
+
+配对结果说明 UIA8 在四个应用上都不差于 legacy，记事本是唯一有明显收益的，因此删掉了 `COPICK_WINDOWS_UIA_MODE` 构建开关和 `windows_uia_policy.h`，产品只创建 `CLSID_CUIAutomation8`；创建失败就直接不初始化取词（不退回 legacy 客户端，避免同一个应用在两种代理下读出不同结果，而调用方无法从 `GetSelectedText` 的 `false` 分辨）。
+
+风险在于 `CUIAutomation8` 的代理更完整，可能把 legacy 下判为「不可用」的控件判成 non-text 选区，从而短路剪贴板回退。用 `ClipboardOnlyControl` 夹具（自绘控件，没有无障碍实现，只能靠合成复制取词）验证了这条路径：
+
+| 场景 | 结果 |
+|---|---|
+| `fallback`（显式开启回退） | ✅ `method=99`，浮窗出现并复制，剪贴板 `restoredVerified` |
+| `fallback-disabled`（默认值） | ✅ 无浮窗、无快捷键副作用、剪贴板未变 |
+
+即 UIA8 没有把该控件判成 non-text，回退仍然可执行。
+
+`fallback` 场景偶发 `COPICK_CAPTURE_EMPTY`：改用 UIA8 之后单独跑过一次失败，但成对重跑 legacy 与最终构建各 3 次后全部 `passed=True method=99`（6/6）。失败那次的 `copyShortcutCount` 是 0，而夹具只在 `Selected` 为 true 时才计数，所以要么合成复制没发出、要么发出时应用还没处理完鼠标抬起；驱动在钩子里取词，与应用处理 `WM_LBUTTONUP` 本来就存在竞态。同样的间歇失败在 2026-10-26 的 legacy 日志里就有（批次首轮多次只留下 `CAPTURE_EMPTY`），因此判定为夹具时序问题，与客户端无关。没有继续追查，真实应用拖选未观察到该现象。
+
+记事本在同一最终构建上用 `verify-windows-apps.ps1 -App notepad` 复测，关闭回退和开启回退两轮都是 `method=1`，说明 `CUIAutomation8` 只在取词客户端这一处生效，其余链路未受影响。
+
+## 取词失败可见性（2026-10-28）
+
+回退默认关闭的代价是静默失败：在无障碍取不到文字的应用里拖选，既不弹窗也不报错，用户只会认为软件坏了。日志里一直有 `COPICK_CAPTURE_EMPTY`，但设置页看不到，桌面用户更不会去翻日志。
+
+改动分四处：
+
+- 原生桥（`bridge_win.cc`）失败时也回调 `Selection`，带上程序名和 `failure` 码（0 成功、1 没取到文字、2 选中的不是文字、3 被程序名过滤），不再只传 `nullptr`。程序名在引擎的程序名过滤之前就已填好，所以失败时通常拿得到。
+- `main.rs` 把失败记为 `lastFailure { program, reason }`，成功取词后清除，并通过每秒轮询的 `status` 命令交给设置页；不新增命令。
+- 设置页在回退开关下面多一行「最近一次取词失败：Excel（没有取到文字）。」，并在旁边给「启用兼容复制回退」按钮（等价于勾选开关并保存）。只有「没取到文字」且回退未开启时才出现按钮：选中的是对象、或回退开着仍然失败时，再点一次开关没有帮助。
+- 诊断日志的 `COPICK_CAPTURE_EMPTY` 从 `request` 扩到 `request reason program`，程序名先经 `program_token` 压成小写、只保留字母数字和 `.-_+`、最长 64，日志解析器仍然只接纳这一种 token。
+
+被程序名过滤（终端、密码管理器、用户排除项）和取不到程序名都不记为失败：前者是用户自己的选择，报成故障会误导他去开回退。macOS 没有可开启的回退，失败时原生侧仍不回调结构，因此提示只在 Windows 出现。
+
+真机验证（OMEN，Windows 11 x64 build 26200，150%，交互桌面）：
+
+| 检查 | 结果 |
+|---|---|
+| `fallback-disabled` 场景后产品日志 | `COPICK_CAPTURE_EMPTY request=1 reason=no_text program=selectionfixture.exe` |
+| 同一实例打开设置页后 UIA 读到的文本 | `最近一次取词失败：selectionfixture.exe（没有取到文字）。` 与按钮 `启用兼容复制回退` |
+| 设置页截图 | 提示行在回退说明下方，按钮右对齐，布局未破 |
+
+2026-10-30 在最终构建（提交 `d16db1a`）上重跑了两个场景，补上之后两处修订的真机证据：`drag` 通过（`method=1`，剪贴板 `restoredVerified`，成功取词后提示被清除），`fallback-disabled` 通过（无浮窗、`copyShortcutCount=0`、剪贴板未变），产品日志为 `COPICK_CAPTURE_EMPTY request=1 reason=no_text program=selectionfixture.exe`，仍能通过固定 schema 的日志解析。
+
+未覆盖：按钮点击只在 `test/settings.test.cjs` 的假 DOM 里验证过（勾选 → 保存 → 入口消失），没有在真机点击；`reason=non_text` 与 `reason=fallback_failed` 没有真机样本，靠单元测试覆盖；设置页那行提示没有在新构建上重读，那段 UI 代码与上次验证时相同。macOS 没有这条提示。
 
 ## v0.1.0 产品化验收（2026-10-26）
 

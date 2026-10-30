@@ -59,6 +59,8 @@ struct Selection {
     int method;
     // 小写程序标识（UTF-8）。只用于托盘文案与排除项，指针在回调返回前有效。
     const char *program;
+    // 失败原因，见 FailureCode。0 表示成功；失败时 text 为 NULL、length 为 0。
+    int failure;
 };
 using InputCallback = void (*)(InputEvent);
 using CaptureCallback = void (*)(uint64_t, const Selection *);
@@ -69,6 +71,23 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr auto requestTimeout = std::chrono::milliseconds(1800);
 constexpr size_t maxTextBytes = 1024 * 1024;
+
+// 失败原因只用来说明“为什么什么都没发生”，供设置页提示。
+// 引擎停止时的退出点落在哪个阶段并不确定，所以只按终态区分三类；
+// 被程序名过滤（终端、密码管理器、用户排除项）是用户自己的选择，单独标出以便上游忽略。
+enum class FailureCode : int { None = 0, NoText = 1, NonText = 2, Filtered = 3 };
+FailureCode ClassifyFailure(RetrievalStage stage) {
+    switch (stage) {
+    case RetrievalStage::Idle:
+    case RetrievalStage::ProgramName:
+        return FailureCode::Filtered;
+    case RetrievalStage::UIAutomation:
+    case RetrievalStage::Accessible:
+        return FailureCode::NonText;
+    default:
+        return FailureCode::NoText;
+    }
+}
 
 struct Source { HWND hwnd = nullptr; DWORD pid = 0; DWORD clipboardSequence = 0; POINT down = {}; HCURSOR downCursor = nullptr; };
 
@@ -221,16 +240,27 @@ bool WriteClipboardOwned(Request &request, HWND owner) {
 void WorkerMain(const std::shared_ptr<Worker> &worker) {
     PhysicalCoordinates coordinates;
     HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    // 只创建 CUIAutomation8。WinUI 应用里旧客户端把焦点暴露成不提供 TextPattern 的
+    // Edit，UIA8 下同一个控件是 Document，TextPattern 直接给出选区（记事本已实测）。
+    // 创建失败就不初始化，不退到 CUIAutomation：两种客户端的代理行为不同，混用后
+    // 同一个应用可能读出不同结果，而调用方无法从 GetSelectedText 的 false 里分辨。
     IUIAutomation *automation = nullptr;
-    HRESULT created = FAILED(initialized) ? initialized : CoCreateInstance(CLSID_CUIAutomation,
+    HRESULT created = FAILED(initialized) ? initialized : CoCreateInstance(CLSID_CUIAutomation8,
         nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation, reinterpret_cast<void **>(&automation));
-    HWND owner = SUCCEEDED(created) && automation ? CreateClipboardOwner() : nullptr;
+    if (FAILED(created)) {
+        char diagnostic[128];
+        std::snprintf(diagnostic, sizeof(diagnostic), "Copick UIA: CUIAutomation8 creation failed hr=0x%08lx\n",
+            static_cast<unsigned long>(created));
+        OutputDebugStringA(diagnostic);
+    }
+    const bool ready = SUCCEEDED(created) && automation != nullptr;
+    HWND owner = ready ? CreateClipboardOwner() : nullptr;
     {
         std::lock_guard<std::mutex> lock(worker->mutex);
-        worker->initialized = SUCCEEDED(created) && automation && owner; worker->ready = true;
+        worker->initialized = ready && owner; worker->ready = true;
     }
     worker->cv.notify_all();
-    if (SUCCEEDED(created) && automation && owner) {
+    if (ready && owner) {
         SelectionEngine engine(automation);
         while (!worker->stop.load()) {
             MSG message = {};
@@ -250,6 +280,8 @@ void WorkerMain(const std::shared_ptr<Worker> &worker) {
                     else {
                         std::wstring program;
                         if (GetProgramNameFromHwnd(request->source.hwnd, program)) {
+                            // 单个请求只调用一次引擎：失败后再换客户端重试会绕过
+                            // non-text 判定，还可能重复触发剪贴板回退。
                             ok = engine.GetSelectedText(request->source.hwnd, request->selection, request->config,
                                 ClipboardLockMode::InterruptibleWait, &request->cancel, &request->stage, &request->endingSequence);
                             ok = ok && !request->cancel.load() && ForegroundMatches(request->source) && ToUtf8(request->selection.text, request->utf8);
@@ -266,11 +298,17 @@ void WorkerMain(const std::shared_ptr<Worker> &worker) {
                 if (request->selection.posLevel >= SelectionPositionLevel::Full) {
                     x = request->selection.endBottom.x; y = request->selection.endBottom.y;
                 }
-                if (ok) ToUtf8(request->selection.programName, request->program);
-                Selection selection = {request->utf8.data(), request->utf8.size(),
+                // 失败时也要回传程序名：设置页靠它告诉用户是哪个应用没取到词。
+                // 引擎在程序名过滤之前就填好了 programName，只有取不到窗口程序名时才为空。
+                ToUtf8(request->selection.programName, request->program);
+                const FailureCode failure = ok ? FailureCode::None : ClassifyFailure(request->stage.load());
+                // 文字只在成功时回传：引擎已经读出文字、但随后被取消或前台变化的请求
+                // utf8 里是有内容的，带上就会被上游当成一次成功取词。
+                Selection selection = {ok ? request->utf8.data() : nullptr, ok ? request->utf8.size() : 0,
                     static_cast<int>(request->source.pid), reinterpret_cast<uint64_t>(request->source.hwnd),
-                    x, y, static_cast<int>(request->selection.method), request->program.c_str()};
-                request->captureCallback(request->id, ok ? &selection : nullptr);
+                    x, y, static_cast<int>(request->selection.method), request->program.c_str(),
+                    static_cast<int>(failure)};
+                request->captureCallback(request->id, &selection);
             }
             { std::lock_guard<std::mutex> lock(worker->mutex); worker->active.reset(); }
         }

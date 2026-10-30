@@ -29,6 +29,9 @@ struct Selection {
     const char *text; size_t length; int pid; uint64_t window; double x; double y; int method;
     // bundle identifier，只用于托盘文案与排除项；指针在回调返回前有效。
     const char *program;
+    // 与 Windows 侧保持同一布局。macOS 没有可开启的剪贴板回退，失败时不回调本结构，
+    // 因此这里恒为 0。
+    int failure;
 };
 using InputCallback = void (*)(InputEvent);
 using CaptureCallback = void (*)(uint64_t, const Selection *);
@@ -403,7 +406,7 @@ extern "C" bool cp_capture_begin(const CaptureRequest *input, CaptureCallback ca
                 const char *identifier = [bundle UTF8String];
                 if (identifier) program = identifier;
             }
-            Selection selection = {info.text.data(), info.text.size(), capture.sourcePid, capture.sourceWindow, point.x, point.y, static_cast<int>(info.method), program.c_str()};
+            Selection selection = {info.text.data(), info.text.size(), capture.sourcePid, capture.sourceWindow, point.x, point.y, static_cast<int>(info.method), program.c_str(), 0};
             [front release];
             Finish(request);
             callback(capture.requestId, result ? &selection : nullptr);
