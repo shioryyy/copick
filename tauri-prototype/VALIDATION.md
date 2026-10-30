@@ -2,6 +2,30 @@
 
 日期：2026-10-23。环境：本机 macOS Darwin 27.0.0、Apple Silicon arm64，Rust 1.99.1，Tauri 2.12.5，CLI 2.12.4，selection-hook 2.1.1。
 
+## macOS 应用级取词（2026-10-27）
+
+新增 `scripts/verify-macos-apps.mm` + `.cjs`：把 `bridge.mm` 编进独立进程，用 `CGEventPost` 向真实应用发拖选，再调用产品自己的 `cp_capture_begin`。覆盖的是产品取词与浮窗路径（源码级），不含 Tauri 外壳。
+
+四个实现上的决定，每一个都是被真实失败逼出来的：
+
+1. **不打包 `.app`**。辅助功能授权按 bundle 记录，新 bundle id 必须人工去系统设置勾选，无法自动化；以终端子进程运行则继承终端已有的授权（`AXIsProcessTrusted()` 返回 1）。
+2. **按文档定位窗口**。TextEdit 会保留上一次的窗口，直接取前台窗口会在旧文档上拖选——第一次复跑就取到了 `rototype`，因为起点落在了上一次残留的选区上。改为按 `AXDocument` 匹配本次文件；Safari 按 `AXURL` 匹配。
+3. **先确认页面加载完再拖**。`AXWebArea` 在页面内容到位之前就存在，此时拖选什么也选不到，而 `cp_capture_begin` 会返回窗口的文档 URL 而不是报错。
+4. **剪贴板申领必须在产品写入之后**。守护进程用「复制后的序号 = 上一个序号 + 1」判定这次变更属于产品；提前申领会走 `GuardianClaim` 的短路分支（序号未变时直接返回 true，根本不通知守护进程），结果是复制被当成外部改动、**不会还原**。这个错误第一次运行时真的把本机剪贴板留在了 `CopickPrototype` 上。
+
+### 结果
+
+| 应用 | 取词 | 证据 |
+|---|---|---|
+| TextEdit 1.21 | ✅ method=11 | 拖选得到 `CopickPrototype`，浮窗 `88x40` 出现，`cp_copy_begin` 写入的剪贴板内容正确，`clipboardRestoration.outcome=restoredVerified` |
+| Safari 27.0.1 | ❌ | 拖选确实发生（网页 `onmouseup` 把选区写进标题：`SEL:CopickPrototype`），但 `AXSelectedText` 为空，只有 `AXStringForTextMarkerRange` 能读到 `CopickPrototype`；产品取词返回空 |
+
+Safari 的结论经过三条互相独立的证据交叉确认，不是自动化环境的假象：同一轮里网页自己报告了正确选区，说明鼠标事件送达并产生了选区；`AXSelectedText` 与文本标记范围同时读取，只有一个有值。
+
+这是**上游引擎的缺口**：`selection-hook` 的 `SelectionEngine::GetSelectedTextFromElement` 只尝试 `kAXSelectedText` 和「`kAXValue` + `kAXSelectedTextRange`」两条路径（`core/engine.mm:472`），没有 `AXSelectedTextMarkerRange`。Electron 版用的是同一个引擎，因此同样取不到 Safari 的选区——这不是 Tauri 重构引入的回归，但也意味着换到 Tauri 并不能修好它。
+
+驱动把这条限制固化成了断言：Safari 场景预期「取词为空且文本标记范围正确」，现象一变（无论变好还是变坏）都会失败并提示更新矩阵。`npm run verify:mac-textedit` / `npm run verify:mac-safari`。
+
 ## 兼容复制回退默认策略（2026-10-26）
 
 本轮改变回退策略并做了两平台验证。Windows 引擎的 `GetSelectedText` 接受 stop token，回退可在备份后、发送快捷键前和轮询中取消并恢复备份；macOS 引擎没有该参数，回退无法在事务内取消。因此：
@@ -494,7 +518,8 @@ EXE：`src-tauri/target/release/copick-tauri-prototype.exe`，**3,284,992 bytes�
 ## 尚未验证／实现
 
 - Windows ARM64、NSIS 安装器、无 WebView2 的安装引导、MSAA 独立路径与管理员窗口；已验证的是 x64 UIA 与剪贴板回退两条路径。
-- 第三方真实应用的完整矩阵：浏览器、PDF、Excel、微信和 IDE 等。
+- 第三方真实应用的完整矩阵：浏览器、PDF、Excel、微信和 IDE 等。macOS 侧 2026-10-27 已补 TextEdit（✅）与 Safari（❌，上游引擎缺文本标记路径），Chrome 未安装、Office 与 IM 未测。
+- Safari 的取词缺口需要在上游 `selection-hook` 补 `AXSelectedTextMarkerRange`，或在 `bridge.mm` 里做等价回退；两者都未实现，因此 macOS 上「浏览器取词」目前不可用。
 - 多显示器、混合缩放、负坐标显示器、全屏 Space、系统安全输入。
 - 首次授权、运行中撤销与恢复权限、长期驻留／睡眠唤醒。
 - 完整格式／空剪贴板／外部并发写入下的回退恢复。原型沿用上游事务的已知限制。

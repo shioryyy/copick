@@ -13,13 +13,17 @@
 | 机器 | 系统 | 显示 | 运行方式 |
 |---|---|---|---|
 | OMEN | Windows 11 x64 10.0.26200.9711 | 3840×2160，100% 缩放，单屏 | 交互式桌面会话，非管理员，`--background` 启动 |
-| MacBook（Apple Silicon） | macOS Darwin 27.0.0 | 内建 1440×900 @2x + PHL 275S1 2048×1152 @2x（副屏在左侧） | 只跑了原生浮窗定位夹具；应用级取词未测 |
+| MacBook（Apple Silicon） | macOS Darwin 27.0.0 | 内建 1440×900 @2x + PHL 275S1 2048×1152 @2x（副屏在左侧） | 浮窗定位夹具 + TextEdit / Safari 应用级取词 |
 
 ## 测试方法
 
 `scripts/verify-windows-apps.ps1 -App <notepad|edge|cmd>`：编译 `verify-windows-apps.cs`，用 `SendInput` 绝对移动做真实拖选，找到 Tauri 浮窗（同进程、88×40 缩放后的窗口），点击它并读回剪贴板，最后等浮窗隐藏。记事本与 Edge 会跑两轮——先关回退测无障碍，再开回退测可用性；终端只跑一轮，要求完全不出现选区请求。
 
 注意：`SetCursorPos` 产生的移动不会进入产品的低级鼠标钩子，拖动会被当成单击（`gesture=0`）。脚本必须用 `SendInput` 的绝对移动，这个坑在第一次运行时暴露过。
+
+macOS 用 `npm run verify:mac-textedit` / `npm run verify:mac-safari`（等价于 `node scripts/verify-macos-apps.cjs <app>`）。驱动把测试文字写进临时文件、用 `open -a` 交给目标应用，再按 AX 文档 URL 精确定位本次窗口（TextEdit 会保留上一次的窗口，不锁定就会在旧文档上拖选），最后用 `CGEventPost` 发真实拖选并调用产品的 `cp_capture_begin`。
+
+注意：驱动**不**打包成 `.app`——辅助功能授权按 bundle 记录，新 bundle 要人工去系统设置勾选，而终端子进程直接继承终端已有的授权。运行时会移动鼠标、抢走前台焦点约 3 秒，且桌面必须解锁。剪贴板由 `macos-clipboard-guardian` 备份，并由 `clipboardRestoration.testClipboardRestored` 断言已还原。
 
 ## Windows x64
 
@@ -40,15 +44,17 @@
 
 ## macOS arm64
 
-本轮没有执行 macOS 的**应用级**取词测试（只跑了浮窗定位夹具）。应用矩阵需要在解锁的桌面上逐个应用手动拖选。
+2026-10-27 补了真实应用的取词测试，`scripts/verify-macos-apps.cjs` 把 `bridge.mm` 编进一个独立进程，用 CGEvent 向目标应用发真实拖选，再用产品自己的 `cp_capture_begin` 取词。编译的是产品源码而不是打包后的 `.app`，因此覆盖的是取词与浮窗路径，不含 Tauri 外壳。
 
 | 应用 | bundle identifier | 取词 | 回退 | 备注 |
 |---|---|---|---|---|
-| Safari | com.apple.Safari | — | 禁用 | |
-| TextEdit | com.apple.TextEdit | — | 禁用 | |
-| Chrome | com.google.Chrome | — | 禁用 | |
-| Terminal | com.apple.Terminal | 应不触发 | 禁用 | 平台内置黑名单 |
-| Finder | com.apple.finder | 应不触发 | 禁用 | 平台内置黑名单 |
+| TextEdit | com.apple.TextEdit | ✅ 2026-10-27 method=11 | 禁用 | 拖选一段文字，取到 `CopickPrototype`，浮窗与复制均正确，剪贴板已还原 |
+| Safari | com.apple.Safari | ❌ 2026-10-27 | 禁用 | 拖选成功（网页自身报告选区正确），但 Safari 27 只提供 `AXSelectedTextMarkerRange`，`AXSelectedText` 为空，产品取词拿不到文字。Electron 版使用同一个 `selection-hook` 引擎，同样受影响；这不是 Tauri 回归，是上游引擎在新版 Safari 上的缺口 |
+| Chrome | com.google.Chrome | — | 禁用 | 本机未安装 |
+| Terminal | com.apple.Terminal | 应不触发 | 禁用 | 内置黑名单常量，未做交互验证 |
+| Finder | com.apple.finder | 应不触发 | 禁用 | 内置黑名单常量，未做交互验证 |
+
+Safari 那一行是矩阵暴露出的**产品缺口**，不是测试环境问题：驱动在同一轮里同时记录了三条独立证据——网页 `onmouseup` 写入标题的选区、`AXSelectedText`（空）、`AXStringForTextMarkerRange`（正确）。修法是在引擎里补文本标记回退，或在 `bridge.mm` 里做同样的事；两者都尚未实现。
 
 macOS 的剪贴板回退按设计始终关闭（引擎不提供事务内取消），因此「回退」列固定为「禁用」。
 
