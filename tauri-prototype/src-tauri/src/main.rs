@@ -510,21 +510,20 @@ struct Settings {
     startup_error: Option<String>,
     startup_note: &'static str,
     config_error: Option<String>,
-    migrated_from_electron: bool,
     version: String,
 }
 fn settings_snapshot(app: &tauri::AppHandle) -> Settings {
     let store = app.state::<Mutex<config::Store>>();
-    let (config, config_error, migrated) = {
+    let (config, config_error) = {
         let store = store.lock().unwrap();
-        (store.config.clone(), store.error.clone(), store.migrated)
+        (store.config.clone(), store.error.clone())
     };
     let startup = startup::enabled();
     Settings {
         config, fallback_available: cfg!(target_os = "windows"),
         startup_enabled: startup.as_ref().copied().unwrap_or(false),
         startup_available: startup::available(), startup_error: startup.err(), startup_note: startup::note(),
-        config_error, migrated_from_electron: migrated,
+        config_error,
         version: app.package_info().version.to_string(),
     }
 }
@@ -879,8 +878,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![status, configure, permission, settings, save_settings, set_startup, open_logs, quit, set_draft_dirty, close_settings, popup_state, present, copy_selection])
         .setup(|app| {
             let directory = app.path().app_config_dir()?;
-            let legacy = config::legacy_path();
-            let store = config::Store::load(directory.join("config.json"), legacy.as_deref());
+            let store = config::Store::load(directory.join("config.json"));
             diagnostics::init(directory.join("logs/selection.log"));
             {
                 let managed = app.state::<Mutex<State>>();

@@ -48,7 +48,7 @@
     const config = copyConfig(value && value.config);
     if (typeof value.startupEnabled !== 'boolean' || typeof value.startupAvailable !== 'boolean' ||
         typeof value.fallbackAvailable !== 'boolean' ||
-        typeof value.version !== 'string' || typeof value.migratedFromElectron !== 'boolean' ||
+        typeof value.version !== 'string' ||
         ![value.startupError, value.configError].every(error => error === null || typeof error === 'string')) {
       throw new Error('设置响应格式不正确。');
     }

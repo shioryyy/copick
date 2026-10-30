@@ -5,7 +5,7 @@ const elements = Object.fromEntries([
   'status', 'permission', 'pause', 'connection-error', 'listener-error',
   'settings-form', 'startup', 'startup-hint', 'startup-error', 'clipboard-fallback', 'fallback-hint',
   'excluded-apps',
-  'exclusions-hint', 'exclusions-error', 'diagnostics', 'config-error', 'migration-note', 'version',
+  'exclusions-hint', 'exclusions-error', 'diagnostics', 'config-error', 'version',
   'save', 'revert', 'reload-settings', 'settings-message', 'settings-action-error',
   'open-logs', 'quit', 'app-message', 'app-error',
   'close-warning', 'close-continue', 'close-discard'
@@ -94,7 +94,6 @@ function renderSettingsInfo(info) {
     : '当前系统或安装方式不支持设置开机启动。';
   message('startup-error', info.startupError ? `开机启动：${info.startupError}` : '');
   message('config-error', info.configError ? `配置文件：${info.configError}` : '');
-  elements['migration-note'].hidden = !info.migratedFromElectron;
   elements.version.textContent = info.version || '版本未知';
 }
 async function loadSettings() {

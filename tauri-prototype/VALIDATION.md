@@ -49,11 +49,11 @@
 | Windows | 开启 | 可关闭，说明会临时改动剪贴板 | `Config::default` 与反序列化缺省均为 true |
 | macOS | 关闭 | 禁用并说明「无法在事务内取消」 | `validate()` 强制改回 false，忽略旧配置或导入的开启意图 |
 
-Electron 版 `clipboardFallback` 会在首次启动迁移时沿用；启动项不随迁移导入。
+2026-10-27 起不再读取 Electron 版的配置文件：本项目只有作者一个使用者，旧版迁移的代码与「已导入设置」提示一并删除，两个版本各自独立。
 
 ### 自动检查
 
-本机 macOS 与 OMEN（Windows 11 x64 build 26200）均通过 `npm test`：48 条 Node 测试、20 条 Rust 测试。新增的 Rust 测试锁定 Windows 默认开启、macOS 强制关闭，以及迁移只读取 Electron 侧的回退值。
+本机 macOS 与 OMEN（Windows 11 x64 build 26200）均通过 `npm test`：48 条 Node 测试、20 条 Rust 测试。新增的 Rust 测试锁定 Windows 默认开启、macOS 强制关闭。
 
 ### Windows 真机（OMEN，交互式桌面会话）
 

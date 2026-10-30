@@ -17,7 +17,7 @@ function settings(overrides = {}) {
     config: { version: 1, excludedApps: ['terminal'], diagnosticsEnabled: false, clipboardFallback: false },
     fallbackAvailable: true,
     startupEnabled: false, startupAvailable: true, startupError: null, configError: null,
-    migratedFromElectron: false, version: '1.2.3', ...overrides
+    version: '1.2.3', ...overrides
   };
 }
 function status(overrides = {}) {
@@ -99,10 +99,9 @@ test('加载原始配置，轮询只更新监听状态，不覆盖草稿', async
   const h = harness();
   assert.equal(h.elements.save.disabled, true);
   assert.equal(h.elements.diagnostics.checked, false);
-  await loaded(h, settings({ migratedFromElectron: true, configError: '读取旧配置失败' }));
+  await loaded(h, settings({ configError: '读取旧配置失败' }));
   assert.equal(h.elements['excluded-apps'].value, 'terminal');
   assert.equal(h.elements.version.textContent, '1.2.3');
-  assert.equal(h.elements['migration-note'].hidden, false);
   assert.match(h.elements['config-error'].textContent, /读取旧配置失败/);
   assert.equal(h.elements.save.disabled, false, '允许保存以修复损坏的配置文件');
   h.edit('unsaved');
