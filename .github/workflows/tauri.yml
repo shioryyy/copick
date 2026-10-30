@@ -170,12 +170,25 @@ jobs:
       - name: Smoke test actual binary and package release artifacts
         run: npm --prefix tauri-prototype run package
 
+      # 安装包是用户拿到的第一件东西，而 smoke test 只证明构建产物能启动，
+      # 不证明它装得上。这里静默安装到临时目录、点一次开机自启开关、覆盖安装、再卸载。
+      # 需要交互桌面：产品启动要建 WebView2，GitHub 的 Windows runner 是交互会话，可直接跑。
+      - name: Install, launch-at-login, upgrade and uninstall checks (NSIS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & tauri-prototype/scripts/verify-windows-installer.ps1
+          if ($LASTEXITCODE -ne 0) { throw "installer verification failed ($LASTEXITCODE)" }
+          Get-Content tauri-prototype/artifacts/installer-verification.json -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
       - name: Record signing status
         shell: bash
         run: |
           echo 'Signature state is recorded by the steps above; empty secrets mean unsigned (macOS ad-hoc) builds.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Windows portable ZIP requires system Microsoft Edge WebView2 Runtime. NSIS downloads it when needed.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Smoke tests check process exit 0 and JSON ok=true; desktop installation and permission checks remain manual.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Windows installer checks cover silent install, the launch-at-login toggle, reinstalling over an existing install, and uninstall.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'macOS installation and accessibility permission checks remain manual.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Tauri release artifacts
         uses: actions/upload-artifact@v7
