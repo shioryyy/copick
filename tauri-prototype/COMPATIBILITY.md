@@ -12,12 +12,20 @@
 
 | 机器 | 系统 | 显示 | 运行方式 |
 |---|---|---|---|
-| OMEN | Windows 11 x64 10.0.26200.9711 | 3840×2160，100% 缩放，单屏 | 交互式桌面会话，非管理员，`--background` 启动 |
+| OMEN | Windows 11 x64 10.0.26200.9711 | 3840×2160，150% 缩放，单屏 | 交互式桌面会话（计划任务 `LogonType Interactive`），非管理员，`--background` 启动 |
 | MacBook（Apple Silicon） | macOS Darwin 27.0.0 | 内建 1440×900 @2x + PHL 275S1 2048×1152 @2x（副屏在左侧） | 浮窗定位夹具 + TextEdit / Safari 应用级取词 |
 
 ## 测试方法
 
-`scripts/verify-windows-apps.ps1 -App <notepad|edge|cmd>`：编译 `verify-windows-apps.cs`，用 `SendInput` 绝对移动做真实拖选，找到 Tauri 浮窗（同进程、88×40 缩放后的窗口），点击它并读回剪贴板，最后等浮窗隐藏。记事本与 Edge 会跑两轮——先关回退测无障碍，再开回退测可用性；终端只跑一轮，要求完全不出现选区请求。
+`scripts/start-windows-app-matrix.ps1 -App <notepad|cmd|edge|word|vscode>` 注册一个 `LogonType Interactive` 的计划任务来跑 `scripts/verify-windows-apps.ps1`——ssh 落在 Session 0，建不了 WebView2，拖选也打不到真实窗口。脚本编译 `verify-windows-apps.cs`，用 `SendInput` 绝对移动做真实拖选，找到 Tauri 浮窗（同进程、88×40 缩放后的窗口），点击它并读回剪贴板，最后等浮窗隐藏。记事本、Edge、Word、VS Code 会跑两轮——先关回退测无障碍，再开回退测可用性；终端只跑一轮，要求完全不出现选区请求。
+
+几条真机上踩出来的约束，都写进了驱动：
+
+- **拖拽起点不能猜**。Windows 11 记事本正文在客户区顶部，Word 打开导航窗格时页面区从客户区 46% 处才开始，VS Code 有行号栏。驱动先用 UIA 找 `Document`/`Edit` 控件的外框，找不到才按比例扫一遍二维网格。
+- **浮窗出现不代表选对了地方**。Edge 场景里误拖到地址栏同样会弹窗，剪贴板里就是 URL。驱动要求剪贴板内容确实来自测试文档，否则关掉浮窗换下一个坐标。
+- **剪贴板必须先放哨兵**。产品异步写剪贴板，直接读会读到上一轮的残留；哨兵值能区分「产品没写」和「写了旧内容」。哨兵必须用 Win32 `SetClipboardData` 写，`.NET Clipboard.SetText` 的 OLE 延迟渲染会把产品的 `EmptyClipboard` 卡到超时。
+- **DPI 感知必须显式打开**。UIA 的 `BoundingRectangle` 用物理像素，而 `GetClientRect` 默认返回逻辑像素；150% 缩放下 1265 宽的窗口会算出 1803 的右边界。
+- **期望文本要在启动应用前另存一份**。Word 独占打开文档，驱动事后读会抛 `IOException`，整个场景就变成「验证失败」而不是「取词失败」。
 
 注意：`SetCursorPos` 产生的移动不会进入产品的低级鼠标钩子，拖动会被当成单击（`gesture=0`）。脚本必须用 `SendInput` 的绝对移动，这个坑在第一次运行时暴露过。
 
@@ -29,18 +37,21 @@ macOS 用 `npm run verify:mac-textedit` / `npm run verify:mac-safari`（等价�
 
 | 应用 | 程序名 | 取词 | 回退 | 备注 |
 |---|---|---|---|---|
-| Edge（本地 HTML） | msedge.exe | ✅ 2026-10-26 method=1 | ✅ 2026-10-26 method=1 | 正值对照：证明夹具能观察到 UIA 成功。浮窗 `780,229 88x40`，复制内容与选区一致 |
-| 记事本 | notepad.exe | ❌ 2026-10-26 `COPICK_CAPTURE_EMPTY` | ✅ 2026-10-26 method=99 | Windows 11 的 WinUI 记事本连续 5 次拖选都取不到文本，回退复制正确 |
-| 命令提示符 | cmd.exe | 应不触发 ✅ 2026-10-26 | 应不触发 ✅ 2026-10-26 | 日志无 `COPICK_SELECTION_RECEIVED`，终端全局过滤生效 |
+| Edge（本地 HTML） | msedge.exe | ✅ 2026-10-27 method=1 | ✅ 2026-10-27 method=1 | 正值对照：证明夹具能观察到 UIA 成功。复制内容与选区一致，浮窗点击后隐藏 |
+| 记事本（WinUI） | notepad.exe | ❌ 2026-10-27 `COPICK_CAPTURE_EMPTY` | ✅ 2026-10-27 method=99 | 同一轮里驱动用 UIA TextPattern 能读到选区，产品却报空——UIA 树有内容，产品这条路径拿不到。回退正确 |
+| Word | winword.exe | ✅ 2026-10-27 method=1 | ✅ 2026-10-27 method=1 | 打开导航窗格、停在文档视图时拖选，复制内容与文档一致 |
+| 命令提示符 | cmd.exe | 应不触发 ✅ 2026-10-27 | 应不触发 ✅ 2026-10-27 | 日志无 `COPICK_SELECTION_RECEIVED`，终端全局过滤生效 |
+| VS Code | code.exe | ❌ 2026-10-27 UIA 读不到 Monaco 选区 | 禁用（`NoClipboardPrograms`） | 已开 `editor.accessibilitySupport=on` 并加 `--force-renderer-accessibility`，UIA TextPattern 仍返回空串。与 Electron 版同为 UIA-only 策略，两版都不能取词 |
 | Windows Terminal | windowsterminal.exe | — | — | 机器上未安装，未测 |
-| Chrome | chrome.exe | — | — | 未测 |
-| Firefox | firefox.exe | — | — | 未测 |
-| Word / Excel | winword.exe / excel.exe | — | — | 需 Office，未测 |
+| Excel | excel.exe | — | — | 机器上未安装，未测 |
+| Chrome | chrome.exe | — | — | 机器上未安装，未测 |
+| Firefox | firefox.exe | — | — | 机器上未安装，未测 |
 | Edge 内置 PDF | msedge.exe | — | — | 未测 |
 | 微信 / 飞书 | weixin.exe / feishu.exe | — | — | 未测 |
-| VS Code | code.exe | — | 禁用 | 只在复制回退列表里，未人工验证 |
 
-记事本的 `CAPTURE_EMPTY` 与 Electron 版记录（2026-10-18 记事本 UIA ✅）不一致，最可能的原因是当时测的是经典记事本，而当前系统是 WinUI 版。下一轮要么在经典记事本上复测，要么把这一行标注为「WinUI 记事本不支持 UIA」。
+记事本的 `CAPTURE_EMPTY` 与 Electron 版记录（2026-10-18 记事本 UIA ✅）不一致，最可能的原因是当时测的是经典记事本，而当前系统是 WinUI 版。2026-10-27 这一轮拿到了更硬的证据：**同一次拖选，驱动自己用 UIA `TextPattern.GetSelection()` 读得到正确文字，产品的 `cp_capture_begin` 却返回空**。所以不是「WinUI 记事本不支持 UIA」，而是产品在这条控件上取不到词，值得单独查。
+
+VS Code 的失败则相反：驱动和产品都读不到，`TextPattern.GetSelection()` 返回空串。Monaco 即使开启无障碍支持也不把选区暴露成 UIA 文本范围，这是编辑器侧的限制，不是产品缺陷。
 
 ## macOS arm64
 
