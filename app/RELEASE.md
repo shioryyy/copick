@@ -40,7 +40,7 @@ rustc -vV
 | 平台 | 文件 | 内容 |
 | --- | --- | --- |
 | macOS arm64 | `Copick-Tauri-0.1.0-mac-arm64.zip` | 顶层 `Copick Tauri.app`，内含第三方 NOTICE |
-| Windows x64 | `Copick-Tauri-0.1.0-win-x64.zip` | `copick-tauri-prototype.exe` 和 `NOTICE-selection-hook.txt` |
+| Windows x64 | `Copick-Tauri-0.1.0-win-x64.zip` | `copick-tauri-prototype.exe`、`NOTICE-selection-hook.txt` 和空的 `data/`（便携模式，见下） |
 | Windows x64 | `Copick-Tauri-Setup-0.1.0-win-x64.exe` | 当前用户 NSIS 安装程序，第三方 NOTICE 作为应用资源安装 |
 | 每个平台 | `SHA256SUMS.txt` | 该平台 ZIP / EXE 的 SHA-256 值 |
 
@@ -63,11 +63,30 @@ CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 Z
 | `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS | 三者齐全才启用公证（映射到 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`）；有证书但缺公证凭据时只签名 |
 | `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows | base64 PFX，build 之后、package 之前用 Windows SDK 的 `signtool` 签可执行文件与 NSIS 安装包 |
 
+### Windows 签名：SignPath（开源免费，尚未启用）
+
+仓库是公开的 MIT 项目，符合 [SignPath Foundation](https://signpath.org/) 的开源免费签名条件，不用买证书。要启用需要你这边先落地：
+
+1. 申请开源项目并建 project，记下 project slug。
+2. 建 signing policy（例如 `release-signing`）和 artifact configuration。artifact configuration 必须覆盖 `copick-tauri-prototype.exe` 与 NSIS 安装包这两个 `.exe`，并保留原文件名——CI 按文件名把它们放回构建目录。
+3. 记下 organization id，在 SignPath 生成 API token。
+4. 仓库设置里加变量 `SIGNPATH_ORGANIZATION_ID`、`SIGNPATH_PROJECT_SLUG`、`SIGNPATH_POLICY_SLUG`、`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`，secret `SIGNPATH_API_TOKEN`。
+
+`tauri.yml` 在 `SIGNPATH_ORGANIZATION_ID` 非空时上传未签名二进制、提交签名请求、把签名后的文件放回构建目录再打包，并用 `Get-AuthenticodeSignature` 断言签名有效；变量为空时整段跳过，走原来的 signtool（有 `WIN_CSC_LINK` 时）或未签名路径。两个签名路径互斥，不会把同一批文件签两次。
+
+**还没验证**：目前没有 SignPath 账号，这段一次都没真跑过。变量名与 artifact configuration 结构是照其 GitHub Action 的公开接口写的，第一次真跑可能需要按实际返回的目录结构微调。
+
 Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，签名必须在它之前完成。签名后脚本用 `Get-AuthenticodeSignature` 要求每个文件状态为 `Valid`，否则 job 失败。macOS 若同时给了公证凭据，Tauri 在 `npm run build` 内完成公证与 stapler。
 
 ### 发布现状
 
 仓库里没有自动创建 GitHub Release 的工作流：`tauri.yml` 只把产物作为 Actions 附件保留 14 天。需要对外发布时，从 Actions 下载附件，按下面的步骤校验，再手工创建 Release。旧 Electron 版的发布流水线已随 `app/` 一并删除。
+
+## 便携模式
+
+可执行文件旁边（macOS 上是 `Copick Tauri.app` 旁边）存在 `data` 目录时，程序把 `config.json` 和 `logs/` 写进这个目录，整个文件夹复制到另一台机器就能接着用，不碰系统配置目录。Windows 便携 ZIP 自带一个 `data/`（里面有一行 README 说明），解压即是便携版；NSIS 安装版没有这个目录，用系统的用户配置目录。macOS 的 ZIP 保持 `.app` 在顶层，需要便携时自己在 `.app` 旁边建 `data`。
+
+删掉 `data` 就切回系统配置目录，原来的配置不会自动搬过去，需要的话手动拷 `config.json`。
 
 ## 校验与安装
 
@@ -85,7 +104,7 @@ Get-FileHash -Algorithm SHA256 .\Copick-Tauri-Setup-0.1.0-win-x64.exe
 Get-Content .\SHA256SUMS.txt
 ```
 
-macOS 解压产品 ZIP，将 `Copick Tauri.app` 拖入“应用程序”。首次打开可能被 Gatekeeper 拦截；确认来源及哈希后，可按系统提示在“系统设置 → 隐私与安全性”允许打开，不要全局关闭 Gatekeeper。进入“隐私与安全性 → 辅助功能”，允许 **Copick Tauri**；从终端运行开发版获得的授权不能代表安装版已经授权。升级前从托盘退出旧实例，替换后重新核对授权，必要时移除旧条目再授权。
+macOS 解压产品 ZIP，将 `Copick Tauri.app` 拖入“应用程序”。首次打开会被 Gatekeeper 拦截，README 的「下载」一节有逐平台放行步骤；确认来源及哈希后，可按系统提示在“系统设置 → 隐私与安全性”允许打开，不要全局关闭 Gatekeeper。进入“隐私与安全性 → 辅助功能”，允许 **Copick Tauri**；从终端运行开发版获得的授权不能代表安装版已经授权。升级前从托盘退出旧实例，替换后重新核对授权，必要时移除旧条目再授权。
 
 Windows 安装版运行 `Copick-Tauri-Setup-<版本>-win-x64.exe`，按当前用户安装，无需把应用作为管理员长期运行；可通过系统“已安装的应用”卸载。未签名包可能被 SmartScreen 或组织策略拦截，须由用户在确认来源后处理，不能假设所有机器都能直接放行。便携版完整解压到固定目录，保留 NOTICE，与系统 WebView2 一起使用，再运行 `copick-tauri-prototype.exe`。不要从压缩包内直接运行。更新或移动目录前先从托盘退出，移动后检查开机启动项是否需要重新设置。
 

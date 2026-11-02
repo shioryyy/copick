@@ -2,6 +2,40 @@
 
 日期：2026-10-23。环境：本机 macOS Darwin 27.0.0、Apple Silicon arm64，Rust 1.99.1，Tauri 2.12.5，CLI 2.12.4，selection-hook 2.1.1。
 
+## 便携模式与免签名分发（2026-10-30）
+
+回退默认关闭、Electron 版删除之后，剩下的分发问题不是功能而是信任：未签名的包在 Windows 与 macOS 上都会被拦一次。这一轮做三件事，都不花钱。
+
+**便携模式。** 可执行文件旁边（macOS 是 `.app` 旁边）存在 `data` 目录时，`config.json` 与 `logs/` 都写进这个目录，整个文件夹拷走即可。判定逻辑在 `src-tauri/src/storage.rs`，只认目录、不认同名文件，macOS 上也不会写进 bundle 内部（会破坏签名）。Windows 便携 ZIP 现在自带 `data/`，解压即是便携版；NSIS 安装版没有该目录，行为不变。
+
+**放行步骤写清楚。** README 的「下载」一节补了逐平台的一次性操作：Windows 走 SmartScreen 的「更多信息 → 仍要运行」，macOS 走「右键 → 打开」或 `xattr -dr com.apple.quarantine`，并明确不要关闭 Gatekeeper。
+
+**SignPath（可选，未启用）。** `tauri.yml` 增加了一段以仓库变量 `SIGNPATH_ORGANIZATION_ID` 为前提的签名：上传未签名二进制 → 提交签名请求 → 按文件名放回构建目录 → 用 `Get-AuthenticodeSignature` 断言有效。变量为空时整段跳过；有 `WIN_CSC_LINK` 时走原来的 signtool，两条路径互斥。
+
+| 检查 | 结果 |
+|---|---|
+| `portable_root` 单元测试（无目录 / 同名文件 / 有目录 / macOS bundle 内 vs 旁边） | ✅ 2 条，本机通过 |
+| 真实 macOS bundle 上 `--smoke-test` 的 `portable` 字段 | ✅ `.app` 旁边建 `data` 前 `false`、后 `true`；`.app` 内部建 `data` 仍为 `false` |
+| `npm test` | ✅ 82 Node、26 Rust |
+| macOS `npm run build` / `npm run package` | ✅ 含 `portable: false` 的 smoke 断言 |
+| Windows 便携 ZIP 的 `portable: true` 断言 | ✅ CI 打包日志 `{"ok":true,...,"portable":true}`（macOS 为 `false`） |
+| CI 产出的便携 ZIP 里有 `data/` | ✅ 解包后为 `data/README.txt`、`copick-tauri-prototype.exe`、`NOTICE-selection-hook.txt` |
+| 真机读 `data/config.json`（OMEN 交互桌面，便携 ZIP 解包后直跑） | ✅ 见下 |
+| SignPath 路径 | ❌ 没有账号，一次都没真跑过 |
+
+`--smoke-test` 现在多输出一个 `portable` 布尔值（只有真假，不含路径），`package.cjs` 拿真实产物的布局核对：macOS 的 `.app` 里跑 smoke 必须为 `false`，Windows 便携目录里的 exe 必须为 `true`。这覆盖了 `storage_directory` 的接线（`current_exe` → `portable_root`），打包布局一旦破坏 portable 判定就会失败。
+
+便携模式的真机检查（2026-10-30，OMEN，Windows x64）：把 CI 的 `Copick-Tauri-0.1.0-win-x64.zip` 解到临时目录，用 `LogonType Interactive` 的计划任务在同一交互桌面跑两次，只统计本次启动进程的可见顶层窗口。
+
+| 场景 | 可见窗口 | 结论 |
+|---|---|---|
+| `data/` 为空，`--background` 启动 | 只有 `local.copick.tauri-siw` | 不弹设置页，符合预期 |
+| `data/config.json` 内容写坏 | `Copick 设置` + 上面那个 | 读到了 `data/config.json`，读失败才弹设置页 |
+
+两次运行后 `%APPDATA%\local.copick.tauri\config.json` 前后都不存在，说明没有写系统配置目录；坏掉的 `data/config.json` 原样保留，没有被覆盖。
+
+仍未覆盖：便携模式的**写入**没有验证——`Store::load` 只在文件已存在时读取、启动不落盘，而改设置需要人点界面，所以「保存后 `data/config.json` 出现」仍然只有 `config.rs` 里针对任意路径的单元测试间接覆盖。SignPath 的变量名与 artifact configuration 结构按公开接口写的，第一次真跑可能要按实际返回目录微调。
+
 ## macOS 应用级取词（2026-10-27）
 
 新增 `scripts/verify-macos-apps.mm` + `.cjs`：把 `bridge.mm` 编进独立进程，用 `CGEventPost` 向真实应用发拖选，再调用产品自己的 `cp_capture_begin`。覆盖的是产品取词与浮窗路径（源码级），不含 Tauri 外壳。
