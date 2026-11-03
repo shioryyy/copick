@@ -2,7 +2,7 @@
 
 产品名为 **Copick Tauri**，应用标识为 `local.copick.tauri`，可执行文件名仍为 `copick-tauri-prototype`（Windows 带 `.exe`）。版本取自 `src-tauri/tauri.conf.json`，发布前应同步核对 `package.json` 和 `src-tauri/Cargo.toml` 的版本。
 
-没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。`tauri.yml` 只生成可下载附件，不创建 GitHub Release。自动构建通过不等于完成真实安装和桌面功能验收。
+没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。推 `v*` 标签时 `tauri.yml` 会把两个平台的产物合成一个 GitHub Release（见「发布：推标签」），其余情况只生成可下载附件。自动构建通过不等于完成真实安装和桌面功能验收。
 
 ## 构建要求
 
@@ -48,9 +48,9 @@ rustc -vV
 
 ## 独立 CI
 
-`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`，以及 main push / PR 的 Tauri 路径变化；`.github/workflows/tauri.yml` 与 `app/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
+`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`、main push / PR 的 Tauri 路径变化，以及 `v*` 标签（标签推送不受 `paths` 过滤）；`.github/workflows/tauri.yml` 与 `app/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
 
-CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。
+CI 默认 `contents: read` 权限；只有 `Publish GitHub Release` 那个 job 提到 `contents: write`，用来建 Release。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。
 
 ### CI 签名管线
 
@@ -63,24 +63,25 @@ CI 使用 `contents: read` 权限。下载的 Actions artifact 是外层容器 Z
 | `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS | 三者齐全才启用公证（映射到 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`）；有证书但缺公证凭据时只签名 |
 | `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows | base64 PFX，build 之后、package 之前用 Windows SDK 的 `signtool` 签可执行文件与 NSIS 安装包 |
 
-### Windows 签名：SignPath（开源免费，尚未启用）
-
-仓库是公开的 MIT 项目，符合 [SignPath Foundation](https://signpath.org/) 的开源免费签名条件，不用买证书。要启用需要你这边先落地：
-
-1. 申请开源项目并建 project，记下 project slug。
-2. 建 signing policy（例如 `release-signing`）和 artifact configuration。artifact configuration 必须覆盖 `copick-tauri-prototype.exe` 与 NSIS 安装包这两个 `.exe`，并保留原文件名——CI 按文件名把它们放回构建目录。
-3. 记下 organization id，在 SignPath 生成 API token。
-4. 仓库设置里加变量 `SIGNPATH_ORGANIZATION_ID`、`SIGNPATH_PROJECT_SLUG`、`SIGNPATH_POLICY_SLUG`、`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`，secret `SIGNPATH_API_TOKEN`。
-
-`tauri.yml` 在 `SIGNPATH_ORGANIZATION_ID` 非空时上传未签名二进制、提交签名请求、把签名后的文件放回构建目录再打包，并用 `Get-AuthenticodeSignature` 断言签名有效；变量为空时整段跳过，走原来的 signtool（有 `WIN_CSC_LINK` 时）或未签名路径。两个签名路径互斥，不会把同一批文件签两次。
-
-**还没验证**：目前没有 SignPath 账号，这段一次都没真跑过。变量名与 artifact configuration 结构是照其 GitHub Action 的公开接口写的，第一次真跑可能需要按实际返回的目录结构微调。
-
 Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，签名必须在它之前完成。签名后脚本用 `Get-AuthenticodeSignature` 要求每个文件状态为 `Valid`，否则 job 失败。macOS 若同时给了公证凭据，Tauri 在 `npm run build` 内完成公证与 stapler。
 
-### 发布现状
+### 发布：推标签
 
-仓库里没有自动创建 GitHub Release 的工作流：`tauri.yml` 只把产物作为 Actions 附件保留 14 天。需要对外发布时，从 Actions 下载附件，按下面的步骤校验，再手工创建 Release。旧 Electron 版的发布流水线已随 `app/` 一并删除。
+发布就是把 `v<版本>` 标签推到 main 上已合入的提交：
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+`tauri.yml` 对 `v*` 标签同样跑完整构建，全部通过后由 `Publish GitHub Release` 这个 job 建 Release：
+
+1. 核对标签是否等于 `v` + `tauri.conf.json` 的版本，被覆盖或手动设置错版本时直接失败，不会把别的版本的包挂上来。
+2. 下载两个平台的附件，把各自的 `SHA256SUMS.txt` 合成一份，并在建 Release 前用 `sha256sum -c` 逐个校验。
+3. `gh release create` 建 Release，正文用 `--generate-notes` 由提交生成。
+
+任何一个平台构建失败都不会出 Release（`needs: package`）。不推标签时行为不变，产物仍然只作为 Actions 附件保留 14 天。旧 Electron 版的发布流水线已随 `app/` 一并删除。
+
+删掉或移动标签不会删 Release，需要时在网页上手动处理。
 
 ## 便携模式
 
