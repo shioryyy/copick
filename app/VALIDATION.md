@@ -10,9 +10,13 @@
 |---|---|
 | 工作流 YAML 语法 | ✅ `npx js-yaml` 解析通过 |
 | 非标签推送（PR / main）行为 | ✅ 与之前一致，`release` job 因 `if` 不启动 |
-| 推标签到真建出 Release | ❌ 还没有打过标签，这条路径一次都没真跑过 |
+| 推标签到真建出 Release | ✅ 2026-11-03 推 `v0.4.0`，两个平台构建成功后 `Publish GitHub Release` 也 success |
+| Release 的产物与校验和 | ✅ 4 个附件；下载后用 `shasum -a 256 -c SHA256SUMS.txt` 三个文件全 OK |
+| 下载的 macOS 包版本 | ✅ `Info.plist` 为 `0.4.0`，`CFBundleIdentifier` 仍是 `local.copick.tauri` |
 
-`release` job 只在 `refs/tags/v*` 上运行，标签与版本对不上会直接失败，不会把别的版本的产物挂到当前标签下。校验和合并、`sha256sum -c` 与 `gh release create` 的参数都是按公开接口写的，第一次真跑需要确认 Linux runner 上的文件名与 `SHA256SUMS.txt` 里的条目一一对应。
+`release` job 只在 `refs/tags/v*` 上运行，标签与版本对不上会直接失败，不会把别的版本的产物挂到当前标签下。首跑（v0.4.0）结果：标签触发的 run 里 Windows / macOS / Release 三个 job 全 success，Release 带三个安装包与合并后的 `SHA256SUMS.txt`。
+
+首跑发现的一点小问题：`--generate-notes` 生成的是 PR 列表（还带一条 "New Contributors"），把已被移除的 SignPath PR 标题也列了进去。`v0.4.0` 的正文已手工换成 CHANGELOG 的 0.4.0 小节加下载说明；以后发布要么继续手工替换，要么改成从 CHANGELOG 取正文。
 
 ## 便携模式与免签名分发（2026-10-30）
 
