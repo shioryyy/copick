@@ -1,10 +1,22 @@
 # 更新日志
 
-格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。发布流程：更新本文件的对应版本小节，把 `app/src-tauri/tauri.conf.json` 与 `app/package.json` 的版本改成同一号。仓库目前没有自动创建 GitHub Release 的工作流，产物从 Actions 的 Tauri packages 附件下载，校验与安装见 `app/RELEASE.md`。
+格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。发布流程：更新本文件的对应版本小节，把 `app/src-tauri/tauri.conf.json`、`app/package.json` 与 `app/src-tauri/Cargo.toml` 的版本改成同一号，然后推 `v<版本>` 标签——CI 构建通过后会自动创建 GitHub Release。分步校验与安装见 `app/RELEASE.md`。
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
+Tauri 版接过 Electron 版成为唯一实现后的第一个正式版本。
+
+### 新增
+
+- Windows 取词改用 `CUIAutomation8`，WinUI 记事本等应用能读到选区；取不到词时不再静默，设置页显示最近一次失败的应用和原因。
+- 便携模式：程序旁边（macOS 是 `.app` 旁边）有 `data` 目录时，配置和日志写进该目录，整个文件夹拷走即可；Windows 便携 ZIP 自带 `data/`。
+- README 写清 Windows SmartScreen 与 macOS Gatekeeper 的一次性放行步骤。
+
 ### 变更
+
+- Windows 的兼容复制回退（模拟 Ctrl+Insert／Ctrl+C）改为默认关闭，需要时在设置页开启。
 
 - 移除 Electron 版：`app/`、`docs/`、`build/` 以及 `ci.yml`、`release.yml` 一并删除，Tauri 版成为唯一实现并移入 `app/`（原 `tauri-prototype/`）。`selection-hook@2.1.1` 改为 `app` 自己的依赖，原生源码不再从 Electron 的 `node_modules` 取。
 - 设置页按用途分组，支持系统深浅色主题、清晰的权限与保存状态、排除应用列表和一键添加最近取词应用。
@@ -64,6 +76,7 @@
 - 未签名、未公证，无安装器与自动更新。
 - 底层库没有只读前台身份接口，非键鼠触发的前台切换可能在超时前留下旧浮窗。
 
-[Unreleased]: https://github.com/shioryyy/copick/compare/v0.3.0-beta.2...HEAD
+[Unreleased]: https://github.com/shioryyy/copick/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/shioryyy/copick/releases/tag/v0.4.0
 [0.3.0-beta.2]: https://github.com/shioryyy/copick/releases/tag/v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/shioryyy/copick/releases/tag/v0.3.0-beta.1
