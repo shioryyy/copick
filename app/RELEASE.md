@@ -35,13 +35,13 @@ rustc -vV
 
 `npm run package` **不会自动编译**，必须在成功 build 后运行。打包器先检查必要文件，再运行实际 `.app` 中或 Windows 便携暂存目录中的可执行文件，带 `--smoke-test`，要求退出码为 0 且标准输出是含 `"ok": true` 的 JSON。`permission` 可以为 false，CI 不请求辅助功能授权、不启动正常 UI、不安装 NSIS。macOS 使用 `/usr/bin/ditto` 保留 `.app` 结构和资源；Windows 使用 PowerShell `Compress-Archive`，路径通过环境变量传入，不拼接到 PowerShell 源码。
 
-成功后，`app/artifacts/release/` 只包含当前平台文件（下表以版本 0.1.0 为例）：
+成功后，`app/artifacts/release/` 只包含当前平台文件（下表以版本 0.4.0 为例）：
 
 | 平台 | 文件 | 内容 |
 | --- | --- | --- |
-| macOS arm64 | `Copick-Tauri-0.1.0-mac-arm64.zip` | 顶层 `Copick Tauri.app`，内含第三方 NOTICE |
-| Windows x64 | `Copick-Tauri-0.1.0-win-x64.zip` | `copick-tauri-prototype.exe`、`NOTICE-selection-hook.txt` 和空的 `data/`（便携模式，见下） |
-| Windows x64 | `Copick-Tauri-Setup-0.1.0-win-x64.exe` | 当前用户 NSIS 安装程序，第三方 NOTICE 作为应用资源安装 |
+| macOS arm64 | `Copick-Tauri-0.4.0-mac-arm64.zip` | 顶层 `Copick Tauri.app`，内含第三方 NOTICE |
+| Windows x64 | `Copick-Tauri-0.4.0-win-x64.zip` | `copick-tauri-prototype.exe`、`NOTICE-selection-hook.txt` 和空的 `data/`（便携模式，见下） |
+| Windows x64 | `Copick-Tauri-Setup-0.4.0-win-x64.exe` | 当前用户 NSIS 安装程序，第三方 NOTICE 作为应用资源安装 |
 | 每个平台 | `SHA256SUMS.txt` | 该平台 ZIP / EXE 的 SHA-256 值 |
 
 目录仅在本次所有检查及归档成功后替换；失败时旧目录可能仍在，**不能将上次成功留下的附件当成本次结果**。两平台分别构建，分别校验各自清单；从 CI 下载后保存到不同目录，避免两个 `SHA256SUMS.txt` 互相覆盖。
@@ -70,7 +70,7 @@ Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的
 发布就是把 `v<版本>` 标签推到 main 上已合入的提交：
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.4.0 && git push origin v0.4.0
 ```
 
 `tauri.yml` 对 `v*` 标签同样跑完整构建，全部通过后由 `Publish GitHub Release` 这个 job 建 Release：
@@ -100,8 +100,8 @@ shasum -a 256 -c SHA256SUMS.txt
 Windows 可用以下命令查看两份文件的哈希，逐一对照同目录的 `SHA256SUMS.txt`（哈希大小写不影响比较）：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\Copick-Tauri-0.1.0-win-x64.zip
-Get-FileHash -Algorithm SHA256 .\Copick-Tauri-Setup-0.1.0-win-x64.exe
+Get-FileHash -Algorithm SHA256 .\Copick-Tauri-0.4.0-win-x64.zip
+Get-FileHash -Algorithm SHA256 .\Copick-Tauri-Setup-0.4.0-win-x64.exe
 Get-Content .\SHA256SUMS.txt
 ```
 
