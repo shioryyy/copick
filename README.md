@@ -8,7 +8,7 @@
 
 ## 下载
 
-[GitHub Releases](https://github.com/shioryyy/copick/releases) 里现有的包是旧的 Electron 版，不再更新。当前版本只有 CI 附件：在 Actions 的 **Tauri packages** 运行里下载 `copick-tauri-mac-arm64` / `copick-tauri-win-x64`，解开外层 ZIP 后按 [app/RELEASE.md](app/RELEASE.md) 校验与安装。
+Tauri 版还没有发布过正式 Release：[Releases](https://github.com/shioryyy/copick/releases) 里现有的包是旧的 Electron 版，不再更新，别下。现在拿包有两条路：推 `v<版本>` 标签后，CI 会自动把两平台产物发到 Releases；否则在 Actions 的 **Tauri packages** 运行里下载 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，解开外层 ZIP 后按 [app/RELEASE.md](app/RELEASE.md) 校验与安装。
 
 产物未代码签名，第一次运行时系统会拦一次，按下面放行即可（只需要做一次）：
 

@@ -2,6 +2,18 @@
 
 日期：2026-10-23。环境：本机 macOS Darwin 27.0.0、Apple Silicon arm64，Rust 1.99.1，Tauri 2.12.5，CLI 2.12.4，selection-hook 2.1.1。
 
+## 发布：推标签建 Release（2026-11-03）
+
+`.github/workflows/tauri.yml` 增加 `v*` 标签触发，并在两个平台的构建都成功后由 `Publish GitHub Release` job 汇总产物建 Release：核对标签与 `tauri.conf.json` 版本一致、合并两份 `SHA256SUMS.txt` 并 `sha256sum -c` 校验、`gh release create --generate-notes`。
+
+| 检查 | 结果 |
+|---|---|
+| 工作流 YAML 语法 | ✅ `npx js-yaml` 解析通过 |
+| 非标签推送（PR / main）行为 | ✅ 与之前一致，`release` job 因 `if` 不启动 |
+| 推标签到真建出 Release | ❌ 还没有打过标签，这条路径一次都没真跑过 |
+
+`release` job 只在 `refs/tags/v*` 上运行，标签与版本对不上会直接失败，不会把别的版本的产物挂到当前标签下。校验和合并、`sha256sum -c` 与 `gh release create` 的参数都是按公开接口写的，第一次真跑需要确认 Linux runner 上的文件名与 `SHA256SUMS.txt` 里的条目一一对应。
+
 ## 便携模式与免签名分发（2026-10-30）
 
 回退默认关闭、Electron 版删除之后，剩下的分发问题不是功能而是信任：未签名的包在 Windows 与 macOS 上都会被拦一次。这一轮做三件事，都不花钱。
@@ -10,7 +22,7 @@
 
 **放行步骤写清楚。** README 的「下载」一节补了逐平台的一次性操作：Windows 走 SmartScreen 的「更多信息 → 仍要运行」，macOS 走「右键 → 打开」或 `xattr -dr com.apple.quarantine`，并明确不要关闭 Gatekeeper。
 
-**SignPath（可选，未启用）。** `tauri.yml` 增加了一段以仓库变量 `SIGNPATH_ORGANIZATION_ID` 为前提的签名：上传未签名二进制 → 提交签名请求 → 按文件名放回构建目录 → 用 `Get-AuthenticodeSignature` 断言有效。变量为空时整段跳过；有 `WIN_CSC_LINK` 时走原来的 signtool，两条路径互斥。
+**第三方签名的尝试与放弃。** 曾接过 SignPath 的开源免费签名（变量为空时整段跳过），后来决定不申请账号，那段接线已全部移除；Windows 仍是「有 `WIN_CSC_LINK` 就用 signtool 签，没有就未签名」。
 
 | 检查 | 结果 |
 |---|---|
@@ -21,7 +33,7 @@
 | Windows 便携 ZIP 的 `portable: true` 断言 | ✅ CI 打包日志 `{"ok":true,...,"portable":true}`（macOS 为 `false`） |
 | CI 产出的便携 ZIP 里有 `data/` | ✅ 解包后为 `data/README.txt`、`copick-tauri-prototype.exe`、`NOTICE-selection-hook.txt` |
 | 真机读 `data/config.json`（OMEN 交互桌面，便携 ZIP 解包后直跑） | ✅ 见下 |
-| SignPath 路径 | ❌ 没有账号，一次都没真跑过 |
+| 真机写 `data/config.json`（同一构建，UI 自动化点保存） | ✅ 见下 |
 
 `--smoke-test` 现在多输出一个 `portable` 布尔值（只有真假，不含路径），`package.cjs` 拿真实产物的布局核对：macOS 的 `.app` 里跑 smoke 必须为 `false`，Windows 便携目录里的 exe 必须为 `true`。这覆盖了 `storage_directory` 的接线（`current_exe` → `portable_root`），打包布局一旦破坏 portable 判定就会失败。
 
@@ -34,7 +46,9 @@
 
 两次运行后 `%APPDATA%\local.copick.tauri\config.json` 前后都不存在，说明没有写系统配置目录；坏掉的 `data/config.json` 原样保留，没有被覆盖。
 
-仍未覆盖：便携模式的**写入**没有验证——`Store::load` 只在文件已存在时读取、启动不落盘，而改设置需要人点界面，所以「保存后 `data/config.json` 出现」仍然只有 `config.rs` 里针对任意路径的单元测试间接覆盖。SignPath 的变量名与 artifact configuration 结构按公开接口写的，第一次真跑可能要按实际返回目录微调。
+写入路径同样在真机上做了（2026-10-30，OMEN，同一份便携 ZIP）：用 UI Automation 找到设置窗口里的「启用诊断日志」复选框，切换后点「保存设置」，随后 `data\config.json` 出现，内容为 `{"version":1,"paused":false,"clipboardFallback":false,"excludedApps":[],"diagnosticsEnabled":true}`。整段脚本只操作本次启动的进程，结束时删掉它刚生成的 `config.json`。
+
+仍未覆盖：诊断开启后 `data/logs/selection.log` 的实际落盘没有单独核对（本次运行里没有发生取词，日志文件是否惰性创建未验证）。
 
 ## macOS 应用级取词（2026-10-27）
 
