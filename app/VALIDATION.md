@@ -2,6 +2,18 @@
 
 日期：2026-10-23。环境：本机 macOS Darwin 27.0.0、Apple Silicon arm64，Rust 1.99.1，Tauri 2.12.5，CLI 2.12.4，selection-hook 2.1.1。
 
+## 检查更新按钮（2026-11-04）
+
+设置页「关于」里加了一个「检查更新」按钮，点它用系统浏览器打开 Releases 页面；应用不联网、不做后台版本比较，「无网络请求」的承诺不变。
+
+| 检查 | 结果 |
+|---|---|
+| `npm test` | ✅ 83 Node、26 Rust；新增一条断言：点击只调用 `open_releases`、进行中禁用按钮、失败时显示可见错误 |
+| `npm run build` / `package` | ✅ 编译与打包通过（macOS） |
+| 在真实界面里点一次 | ❌ 没做：本机 `/Applications` 里有一个正在运行的 0.5.0 实例，单实例机制会让新构建直接退出转发，我没去动用户正在用的进程 |
+
+`open_releases` 的实现和已有的 `open_logs` 同形（macOS 走 `/usr/bin/open`，Windows 走 `explorer.exe`），只多了 URL 常量与 `require(&window, "control")` 校验。
+
 ## 改名 Copick 与 macOS 改发 DMG（2026-11-04）
 
 产品名从 “Copick Tauri” 改为 **Copick**，可执行文件从 `copick-tauri-prototype` 改为 `copick`，应用标识从 `local.copick.tauri` 改为 `local.copick`；macOS 产物从 ZIP 换成 DMG。配置目录、NSIS 安装目录、登录启动项名称一起变了，旧的本机设置不会自动迁移。

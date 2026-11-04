@@ -617,6 +617,22 @@ async fn set_startup(app: tauri::AppHandle, window: WebviewWindow, enabled: bool
         Ok(settings_snapshot(&app))
     }).await.map_err(|error| error.to_string())?
 }
+/// 打开发布页面。
+///
+/// 应用本身不联网、也不会在后台比较版本：用户点「检查更新」才用系统浏览器打开
+/// Releases，版本差异由页面本身呈现。这样「无网络请求」的承诺仍然成立。
+const RELEASES_URL: &str = "https://github.com/shioryyy/copick/releases/latest";
+
+#[tauri::command]
+fn open_releases(window: WebviewWindow) -> Result<(), String> {
+    require(&window, "control")?;
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("/usr/bin/open").arg(RELEASES_URL).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer.exe").arg(RELEASES_URL).spawn();
+    result.map(|_| ()).map_err(|_| "无法打开发布页面。".into())
+}
+
 #[tauri::command]
 fn open_logs(window: WebviewWindow) -> Result<(), String> {
     require(&window, "control")?;
@@ -944,7 +960,7 @@ fn main() {
             }
         }))
         .manage(Mutex::new(State::default()))
-        .invoke_handler(tauri::generate_handler![status, configure, permission, settings, save_settings, set_startup, open_logs, quit, set_draft_dirty, close_settings, popup_state, present, copy_selection])
+        .invoke_handler(tauri::generate_handler![status, configure, permission, settings, save_settings, set_startup, open_logs, open_releases, quit, set_draft_dirty, close_settings, popup_state, present, copy_selection])
         .setup(|app| {
             let directory = storage_directory(app)?;
             let store = config::Store::load(directory.join("config.json"));

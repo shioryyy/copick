@@ -354,6 +354,21 @@ test('日志命令的 void 响应不会作为状态渲染，退出错误可见�
   assert.match(h.elements['app-error'].textContent, /退出受阻/);
   assert.equal(h.elements.quit.disabled, false);
 });
+test('检查更新只打开发布页面，失败时给出可见错误', async () => {
+  const h = harness();
+  await loaded(h);
+  const opening = h.elements['check-updates'].fire('click');
+  assert.equal(h.named('open_releases').length, 1, '点击只调用打开页面的命令');
+  assert.equal(h.elements['check-updates'].disabled, true, '进行中时禁用按钮');
+  h.named('open_releases')[0].resolve(undefined);
+  await opening;
+  assert.match(h.elements['app-message'].textContent, /浏览器/);
+  assert.equal(h.elements['check-updates'].disabled, false);
+  const failing = h.elements['check-updates'].fire('click');
+  h.named('open_releases')[1].reject('没有浏览器');
+  await failing;
+  assert.match(h.elements['app-error'].textContent, /发布页面.*没有浏览器/);
+});
 test('草稿状态同步给主进程，保存后清除', async () => {
   const h = harness();
   await loaded(h);
