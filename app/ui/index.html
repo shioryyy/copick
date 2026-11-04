@@ -81,8 +81,12 @@
       <h2 id="about-title">关于</h2>
       <div class="setting-row">
         <p class="version">Copick <span id="version">版本读取中…</span></p>
-        <button id="quit" type="button">退出 Copick</button>
+        <div class="version-actions">
+          <button id="check-updates" type="button">检查更新</button>
+          <button id="quit" type="button">退出 Copick</button>
+        </div>
       </div>
+      <p class="hint">「检查更新」会在浏览器里打开发布页面；Copick 自己不联网，也不在后台检查版本。</p>
       <p class="hint">关闭此窗口后，Copick 仍在系统托盘常驻。要停止运行，请选择「退出 Copick」。</p>
       <p id="app-message" class="hint" role="status" hidden></p>
       <p id="app-error" class="error" role="alert" hidden></p>

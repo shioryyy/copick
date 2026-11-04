@@ -8,7 +8,7 @@ const elements = Object.fromEntries([
   'excluded-apps',
   'exclusions-hint', 'exclusions-error', 'diagnostics', 'config-error', 'version',
   'save', 'revert', 'reload-settings', 'settings-message', 'settings-action-error',
-  'open-logs', 'quit', 'app-message', 'app-error',
+  'open-logs', 'check-updates', 'quit', 'app-message', 'app-error',
   'close-warning', 'close-continue', 'close-discard'
 ].map(id => [id, document.getElementById(id)]));
 const invoke = (command, args) => {
@@ -235,21 +235,30 @@ async function listenerAction(command, args) {
     updateListenerControls();
   }
 }
+// 应用级动作的完成/失败文案；这些动作共用同一个进行中标志与按钮禁用状态。
+const appActionText = {
+  open_logs: { done: '已请求打开日志文件夹。', failed: '无法打开日志文件夹' },
+  open_releases: { done: '已在浏览器中打开发布页面。', failed: '无法打开发布页面' },
+  quit: { done: '正在退出 Copick…', failed: '退出失败' }
+};
 async function appAction(command) {
   if (appPending || (command === 'quit' && settingsPending)) return;
+  const text = appActionText[command];
   appPending = true;
   message('app-error', '');
   message('app-message', '');
   elements['open-logs'].disabled = true;
+  elements['check-updates'].disabled = true;
   elements.quit.disabled = true;
   try {
     await invoke(command);
-    message('app-message', command === 'open_logs' ? '已请求打开日志文件夹。' : '正在退出 Copick…');
+    message('app-message', text.done);
   } catch (error) {
-    message('app-error', `${command === 'open_logs' ? '无法打开日志文件夹' : '退出失败'}：${errorText(error)}`);
+    message('app-error', `${text.failed}：${errorText(error)}`);
   } finally {
     appPending = false;
     elements['open-logs'].disabled = false;
+    elements['check-updates'].disabled = false;
     elements.quit.disabled = settingsPending;
   }
 }
@@ -332,6 +341,7 @@ for (const [id, event] of [['excluded-apps', 'input'], ['diagnostics', 'change']
   });
 }
 elements['open-logs'].addEventListener('click', () => appAction('open_logs'));
+elements['check-updates'].addEventListener('click', () => appAction('open_releases'));
 elements.quit.addEventListener('click', () => appAction('quit'));
 updateListenerControls();
 loadSettings();

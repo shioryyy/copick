@@ -44,6 +44,7 @@ textarea::placeholder { color: var(--muted); opacity: 1; }
 .error { margin-top: 8px; color: var(--error); font-size: 12px; }
 #config-error { margin: 0 0 12px; }
 .version span { margin-left: 6px; color: var(--muted); }
+.version-actions { display: flex; gap: 8px; }
 .warning { border: 1px solid var(--error); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
 .warning h2 { color: var(--error); }
 .save-bar { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0 16px; border-top: 1px solid var(--border); background: #f6f6f6; }
