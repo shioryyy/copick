@@ -6,7 +6,7 @@
 # LogonType Interactive 的计划任务。这个脚本只负责注册、触发并取回结果。
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$taskName = 'CopickTauriPrototypeInstallerVerify'
+$taskName = 'CopickInstallerVerify'
 $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $script = Join-Path $PSScriptRoot 'verify-windows-installer.ps1'

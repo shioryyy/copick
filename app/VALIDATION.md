@@ -2,6 +2,24 @@
 
 日期：2026-10-23。环境：本机 macOS Darwin 27.0.0、Apple Silicon arm64，Rust 1.99.1，Tauri 2.12.5，CLI 2.12.4，selection-hook 2.1.1。
 
+## 改名 Copick 与 macOS 改发 DMG（2026-11-04）
+
+产品名从 “Copick Tauri” 改为 **Copick**，可执行文件从 `copick-tauri-prototype` 改为 `copick`，应用标识从 `local.copick.tauri` 改为 `local.copick`；macOS 产物从 ZIP 换成 DMG。配置目录、NSIS 安装目录、登录启动项名称一起变了，旧的本机设置不会自动迁移。
+
+| 检查 | 结果 |
+|---|---|
+| `npm test` | ✅ 82 Node、26 Rust |
+| `npm run build` | ✅ 产出 `Copick.app` 与 `Copick_0.5.0_aarch64.dmg` |
+| `Copick.app` 的 Info.plist | ✅ `CFBundleName=Copick`、`CFBundleExecutable=copick`、`CFBundleIdentifier=local.copick`、版本 `0.5.0`、NOTICE 在 `Contents/Resources` |
+| DMG 内容（挂载后看） | ✅ `Copick.app` + 指向 `/Applications` 的符号链接 |
+| `npm run package` | ✅ `Copick-0.5.0-mac-arm64.dmg` + `SHA256SUMS.txt`，smoke 断言 `portable:false` |
+| Windows 构建、安装包、便携 ZIP | ✅ CI 跑通：smoke `"portable":true`，NSIS 安装 / 自启 / 覆盖安装 / 卸载验证 OK |
+| DMG 在无界面 runner 上能否打包 | ✅ CI 的 mac job 自己打出了 `Copick_0.5.0_aarch64.dmg`（`bundle_dmg.sh` 没在有 GUI 的 runner 上翻车） |
+
+构建改用 `--bundles app,dmg`：只指定 `dmg` 时 Tauri 打完会删掉 `bundle/macos` 里的 `.app`，而 `package.cjs` 要在真实的 `.app` 里跑 smoke、核对 NOTICE，所以两个都打，DMG 仍是从同一个 `.app` 封装出来的。
+
+已知代价：改标识等于换应用。旧配置目录 `%APPDATA%\local.copick.tauri` 与 `~/Library/Application Support/local.copick.tauri` 里的设置不会被读取；macOS 需要重新授予辅助功能权限，旧的启动项注册也要重新开一次。
+
 ## 发布：推标签建 Release（2026-11-03）
 
 `.github/workflows/tauri.yml` 增加 `v*` 标签触发，并在两个平台的构建都成功后由 `Publish GitHub Release` job 汇总产物建 Release：核对标签与 `tauri.conf.json` 版本一致、合并两份 `SHA256SUMS.txt` 并 `sha256sum -c` 校验、`gh release create --generate-notes`。

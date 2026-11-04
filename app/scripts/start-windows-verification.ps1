@@ -5,11 +5,11 @@
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$taskName = "CopickTauriPrototypeVerify-$Scenario"
+$taskName = "CopickVerify-$Scenario"
 $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $script = Join-Path $PSScriptRoot 'run-windows-desktop.ps1'
-if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick-tauri-prototype.exe' }
+if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick.exe' }
 $executable = $Executable
 if (!(Test-Path $executable)) { throw "找不到原型可执行文件：$executable" }
 $log = Join-Path $artifacts ("prototype-$Scenario-" + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '.log')

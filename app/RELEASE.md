@@ -1,8 +1,8 @@
-# Copick Tauri 构建与分发
+# Copick 构建与分发
 
-产品名为 **Copick Tauri**，应用标识为 `local.copick.tauri`，可执行文件名仍为 `copick-tauri-prototype`（Windows 带 `.exe`）。版本取自 `src-tauri/tauri.conf.json`，发布前应同步核对 `package.json` 和 `src-tauri/Cargo.toml` 的版本。
+产品名为 **Copick**，应用标识为 `local.copick`，可执行文件名为 `copick`（Windows 为 `copick.exe`）。版本取自 `src-tauri/tauri.conf.json`，发布前应同步核对 `package.json` 和 `src-tauri/Cargo.toml` 的版本。
 
-没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。推 `v*` 标签时 `tauri.yml` 会把两个平台的产物合成一个 GitHub Release（见「发布：推标签」），其余情况只生成可下载附件。自动构建通过不等于完成真实安装和桌面功能验收。
+macOS 只产出 DMG（内含 `Copick.app`），Windows 产出便携 ZIP 与 NSIS 安装包。没有配置签名密钥时，产物**未经过可信代码签名**：macOS 只有 ad-hoc 签名、未公证，Windows 未做 Authenticode 签名。配置了仓库密钥后，CI 会自动做 Developer ID 签名 + 公证，以及 Windows Authenticode 签名（见「CI 签名管线」）。推 `v*` 标签时 `tauri.yml` 会把两个平台的产物合成一个 GitHub Release（见「发布：推标签」），其余情况只生成可下载附件。自动构建通过不等于完成真实安装和桌面功能验收。
 
 ## 构建要求
 
@@ -31,24 +31,24 @@ rustc -vV
 
 `rustc -vV` 的 host 应为 `x86_64-pc-windows-msvc`。`cl` 不带源文件会显示版本和用法；这一步只用于确认编译器可用。旧的 `scripts/build-windows.ps1 -Release` 使用 `--no-bundle`，不能替代这里的 `npm run build`，后者才会生成 NSIS。
 
-默认 build 在 macOS 选择 `--bundles app`，Windows 选择 `--bundles nsis`，保留显式传入的 Tauri 参数。发布打包只支持本机 macOS arm64 / Windows x64，以及默认的 `src-tauri/target/release` 目录；不要给发布构建传入 `--debug`、`--target`、`--no-bundle`、`--config` 产品/版本覆盖，也不要设置 `CARGO_TARGET_DIR` 或 `CARGO_BUILD_TARGET`。切换版本或构建配置后先清理旧的 `src-tauri/target/release/bundle` 再重新 build，避免误取旧包；多个 NSIS EXE 会使打包直接失败。
+默认 build 在 macOS 选择 `--bundles dmg`（Tauri 先产出 `.app` 再封装成 DMG，需要 `hdiutil`），Windows 选择 `--bundles nsis`，保留显式传入的 Tauri 参数。发布打包只支持本机 macOS arm64 / Windows x64，以及默认的 `src-tauri/target/release` 目录；不要给发布构建传入 `--debug`、`--target`、`--no-bundle`、`--config` 产品/版本覆盖，也不要设置 `CARGO_TARGET_DIR` 或 `CARGO_BUILD_TARGET`。切换版本或构建配置后先清理旧的 `src-tauri/target/release/bundle` 再重新 build，避免误取旧包；多个 NSIS EXE 或多个 DMG 都会使打包直接失败。
 
-`npm run package` **不会自动编译**，必须在成功 build 后运行。打包器先检查必要文件，再运行实际 `.app` 中或 Windows 便携暂存目录中的可执行文件，带 `--smoke-test`，要求退出码为 0 且标准输出是含 `"ok": true` 的 JSON。`permission` 可以为 false，CI 不请求辅助功能授权、不启动正常 UI、不安装 NSIS。macOS 使用 `/usr/bin/ditto` 保留 `.app` 结构和资源；Windows 使用 PowerShell `Compress-Archive`，路径通过环境变量传入，不拼接到 PowerShell 源码。
+`npm run package` **不会自动编译**，必须在成功 build 后运行。打包器先检查必要文件（macOS 要求 `.app` 里带 NOTICE、`bundle/dmg` 里恰好一个 DMG），再运行实际 `.app` 中或 Windows 便携暂存目录中的可执行文件，带 `--smoke-test`，要求退出码为 0、标准输出是含 `"ok": true` 的 JSON，且 `portable` 与所在目录布局一致。`permission` 可以为 false，CI 不请求辅助功能授权、不启动正常 UI、不安装 NSIS。macOS 直接把 build 生成的 DMG 复制成 `Copick-<版本>-mac-arm64.dmg`，不再二次打包；Windows 使用 PowerShell `Compress-Archive`，路径通过环境变量传入，不拼接到 PowerShell 源码。
 
-成功后，`app/artifacts/release/` 只包含当前平台文件（下表以版本 0.4.0 为例）：
+成功后，`app/artifacts/release/` 只包含当前平台文件（下表以版本 0.5.0 为例）：
 
 | 平台 | 文件 | 内容 |
 | --- | --- | --- |
-| macOS arm64 | `Copick-Tauri-0.4.0-mac-arm64.zip` | 顶层 `Copick Tauri.app`，内含第三方 NOTICE |
-| Windows x64 | `Copick-Tauri-0.4.0-win-x64.zip` | `copick-tauri-prototype.exe`、`NOTICE-selection-hook.txt` 和空的 `data/`（便携模式，见下） |
-| Windows x64 | `Copick-Tauri-Setup-0.4.0-win-x64.exe` | 当前用户 NSIS 安装程序，第三方 NOTICE 作为应用资源安装 |
+| macOS arm64 | `Copick-0.5.0-mac-arm64.dmg` | 内含 `Copick.app` 与“应用程序”快捷方式，第三方 NOTICE 在 app 资源里 |
+| Windows x64 | `Copick-0.5.0-win-x64.zip` | `copick.exe`、`NOTICE-selection-hook.txt` 和空的 `data/`（便携模式，见下） |
+| Windows x64 | `Copick-Setup-0.5.0-win-x64.exe` | 当前用户 NSIS 安装程序，第三方 NOTICE 作为应用资源安装 |
 | 每个平台 | `SHA256SUMS.txt` | 该平台 ZIP / EXE 的 SHA-256 值 |
 
 目录仅在本次所有检查及归档成功后替换；失败时旧目录可能仍在，**不能将上次成功留下的附件当成本次结果**。两平台分别构建，分别校验各自清单；从 CI 下载后保存到不同目录，避免两个 `SHA256SUMS.txt` 互相覆盖。
 
 ## 独立 CI
 
-`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`、main push / PR 的 Tauri 路径变化，以及 `v*` 标签（标签推送不受 `paths` 过滤）；`.github/workflows/tauri.yml` 与 `app/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，保留 14 天。
+`.github/workflows/tauri.yml` 支持 Actions 中手动 `workflow_dispatch`、main push / PR 的 Tauri 路径变化，以及 `v*` 标签（标签推送不受 `paths` 过滤）；`.github/workflows/tauri.yml` 与 `app/**` 的改动会触发。使用 `macos-latest` arm64 和 `windows-latest` x64 MSVC，先验证 runner 架构，再安装 Node 22 / Rust stable、依赖，运行 `npm test`，build、smoke test、打包，最后上传 `copick-mac-arm64` / `copick-win-x64` 附件，保留 14 天。
 
 CI 默认 `contents: read` 权限；只有 `Publish GitHub Release` 那个 job 提到 `contents: write`，用来建 Release。下载的 Actions artifact 是外层容器 ZIP，先解开，再取其中的产品 ZIP / EXE 与校验文件。
 
@@ -63,14 +63,14 @@ CI 默认 `contents: read` 权限；只有 `Publish GitHub Release` 那个 job �
 | `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS | 三者齐全才启用公证（映射到 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`）；有证书但缺公证凭据时只签名 |
 | `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows | base64 PFX，build 之后、package 之前用 Windows SDK 的 `signtool` 签可执行文件与 NSIS 安装包 |
 
-Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，签名必须在它之前完成。签名后脚本用 `Get-AuthenticodeSignature` 要求每个文件状态为 `Valid`，否则 job 失败。macOS 若同时给了公证凭据，Tauri 在 `npm run build` 内完成公证与 stapler。
+Windows 签名顺序很重要：便携 ZIP 由 `npm run package` 从已签名的可执行文件生成，签名必须在它之前完成。签名后脚本用 `Get-AuthenticodeSignature` 要求每个文件状态为 `Valid`，否则 job 失败。macOS 的 DMG 由 Tauri 在 `npm run build` 内生成，给了签名身份时 `.app` 与 DMG 一并签名，给了公证凭据时一并公证与 stapler。
 
 ### 发布：推标签
 
 发布就是把 `v<版本>` 标签推到 main 上已合入的提交：
 
 ```sh
-git tag v0.4.0 && git push origin v0.4.0
+git tag v0.5.0 && git push origin v0.5.0
 ```
 
 `tauri.yml` 对 `v*` 标签同样跑完整构建，全部通过后由 `Publish GitHub Release` 这个 job 建 Release：
@@ -85,13 +85,13 @@ git tag v0.4.0 && git push origin v0.4.0
 
 ## 便携模式
 
-可执行文件旁边（macOS 上是 `Copick Tauri.app` 旁边）存在 `data` 目录时，程序把 `config.json` 和 `logs/` 写进这个目录，整个文件夹复制到另一台机器就能接着用，不碰系统配置目录。Windows 便携 ZIP 自带一个 `data/`（里面有一行 README 说明），解压即是便携版；NSIS 安装版没有这个目录，用系统的用户配置目录。macOS 的 ZIP 保持 `.app` 在顶层，需要便携时自己在 `.app` 旁边建 `data`。
+可执行文件旁边（macOS 上是 `Copick.app` 旁边）存在 `data` 目录时，程序把 `config.json` 和 `logs/` 写进这个目录，整个文件夹复制到另一台机器就能接着用，不碰系统配置目录。Windows 便携 ZIP 自带一个 `data/`（里面有一行 README 说明），解压即是便携版；NSIS 安装版没有这个目录，用系统的用户配置目录。macOS 只发 DMG，DMG 里不带 `data`；需要便携就把 `Copick.app` 从 DMG 拖到别处、在旁边建一个 `data`。
 
 删掉 `data` 就切回系统配置目录，原来的配置不会自动搬过去，需要的话手动拷 `config.json`。
 
 ## 校验与安装
 
-macOS 在下载附件的目录检查哈希：
+macOS 在下载附件的目录检查哈希（Release 里只有一份覆盖全部平台的 `SHA256SUMS.txt`）：
 
 ```sh
 shasum -a 256 -c SHA256SUMS.txt
@@ -100,16 +100,16 @@ shasum -a 256 -c SHA256SUMS.txt
 Windows 可用以下命令查看两份文件的哈希，逐一对照同目录的 `SHA256SUMS.txt`（哈希大小写不影响比较）：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\Copick-Tauri-0.4.0-win-x64.zip
-Get-FileHash -Algorithm SHA256 .\Copick-Tauri-Setup-0.4.0-win-x64.exe
+Get-FileHash -Algorithm SHA256 .\Copick-0.5.0-win-x64.zip
+Get-FileHash -Algorithm SHA256 .\Copick-Setup-0.5.0-win-x64.exe
 Get-Content .\SHA256SUMS.txt
 ```
 
-macOS 解压产品 ZIP，将 `Copick Tauri.app` 拖入“应用程序”。首次打开会被 Gatekeeper 拦截，README 的「下载」一节有逐平台放行步骤；确认来源及哈希后，可按系统提示在“系统设置 → 隐私与安全性”允许打开，不要全局关闭 Gatekeeper。进入“隐私与安全性 → 辅助功能”，允许 **Copick Tauri**；从终端运行开发版获得的授权不能代表安装版已经授权。升级前从托盘退出旧实例，替换后重新核对授权，必要时移除旧条目再授权。
+macOS 双击 DMG，将 `Copick.app` 拖入“应用程序”。首次打开会被 Gatekeeper 拦截，README 的「下载」一节有逐平台放行步骤；确认来源及哈希后，可按系统提示在“系统设置 → 隐私与安全性”允许打开，不要全局关闭 Gatekeeper。进入“隐私与安全性 → 辅助功能”，允许 **Copick**；从终端运行开发版获得的授权不能代表安装版已经授权。升级前从托盘退出旧实例，替换后重新核对授权，必要时移除旧条目再授权。
 
-Windows 安装版运行 `Copick-Tauri-Setup-<版本>-win-x64.exe`，按当前用户安装，无需把应用作为管理员长期运行；可通过系统“已安装的应用”卸载。未签名包可能被 SmartScreen 或组织策略拦截，须由用户在确认来源后处理，不能假设所有机器都能直接放行。便携版完整解压到固定目录，保留 NOTICE，与系统 WebView2 一起使用，再运行 `copick-tauri-prototype.exe`。不要从压缩包内直接运行。更新或移动目录前先从托盘退出，移动后检查开机启动项是否需要重新设置。
+Windows 安装版运行 `Copick-Setup-<版本>-win-x64.exe`，按当前用户安装，无需把应用作为管理员长期运行；可通过系统“已安装的应用”卸载。未签名包可能被 SmartScreen 或组织策略拦截，须由用户在确认来源后处理，不能假设所有机器都能直接放行。便携版完整解压到固定目录，保留 NOTICE，与系统 WebView2 一起使用，再运行 `copick.exe`。不要从压缩包内直接运行。更新或移动目录前先从托盘退出，移动后检查开机启动项是否需要重新设置。
 
-应用标识为 `local.copick.tauri`，版本升级时仍应核对自己的配置、托盘及启动项行为。
+应用标识为 `local.copick`，版本升级时仍应核对自己的配置、托盘及启动项行为。
 
 ## 可选签名
 

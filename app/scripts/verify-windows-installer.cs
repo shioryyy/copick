@@ -17,9 +17,9 @@ static class InstallerCheck
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     // 与 src-tauri/src/startup.rs 的 NAME 保持一致；改名必须同时改两处。
-    const string ValueName = "CopickTauri";
-    const string ConfigDirectory = "local.copick.tauri";
-    const string ProcessName = "copick-tauri-prototype";
+    const string ValueName = "Copick";
+    const string ConfigDirectory = "local.copick";
+    const string ProcessName = "copick";
 
     static readonly List<string> steps = new List<string>();
     static readonly Dictionary<string, object> report = new Dictionary<string, object>();
@@ -134,7 +134,7 @@ static class InstallerCheck
         // 1. 静默安装。NSIS 要求 /D 是最后一个参数且不加引号。
         var install = Process.Start(new ProcessStartInfo(setup, "/S /D=" + target) { UseShellExecute = false });
         bool installed = WaitForExit(install, 180000) && install.ExitCode == 0;
-        string exe = Path.Combine(target, "Copick Tauri.exe");
+        string exe = Path.Combine(target, "Copick.exe");
         // Tauri 的 NSIS 安装目录里可执行文件名取 productName，不是包名。
         if (!File.Exists(exe)) exe = Directory.Exists(target)
             ? Directory.GetFiles(target, "*.exe").FirstOrDefault(name => Path.GetFileName(name).IndexOf("Copick", StringComparison.OrdinalIgnoreCase) >= 0)

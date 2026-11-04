@@ -39,7 +39,7 @@ mod tests {
     #[test]
     fn portable_root_requires_a_data_directory_beside_the_executable() {
         let root = root();
-        let executable = root.join("copick-tauri-prototype.exe");
+        let executable = root.join("copick.exe");
         fs::write(&executable, b"").unwrap();
         // 没有 data 目录：不启用便携模式，安装版照常用系统配置目录。
         assert_eq!(portable_root(&executable), None);
@@ -56,13 +56,13 @@ mod tests {
     #[test]
     fn portable_root_sits_beside_the_app_bundle() {
         let root = root();
-        let macos = root.join("Copick Tauri.app/Contents/MacOS");
+        let macos = root.join("Copick.app/Contents/MacOS");
         fs::create_dir_all(&macos).unwrap();
-        let executable = macos.join("copick-tauri-prototype");
+        let executable = macos.join("copick");
         fs::write(&executable, b"").unwrap();
         assert_eq!(portable_root(&executable), None);
         // data 放在 .app 里面不算：bundle 内部会被签名校验，写进去会破坏签名。
-        fs::create_dir_all(root.join("Copick Tauri.app/data")).unwrap();
+        fs::create_dir_all(root.join("Copick.app/data")).unwrap();
         assert_eq!(portable_root(&executable), None);
         fs::create_dir(root.join("data")).unwrap();
         assert_eq!(portable_root(&executable), Some(root.join("data")));

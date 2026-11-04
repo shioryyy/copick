@@ -14,9 +14,10 @@ if (existsSync(path.join(localTools, 'cargo', 'bin', process.platform === 'win32
 }
 const [command, ...args] = process.argv.slice(2);
 if (command === 'build' && !args.some(arg => arg === '--no-bundle' || arg === '--bundles' || arg.startsWith('--bundles='))) {
-  const bundle = { darwin: 'app', win32: 'nsis' }[process.platform];
+  // macOS 同时留 .app：打包脚本要在真实的 app 里跑 smoke test、核对 NOTICE。
+  const bundle = { darwin: 'app,dmg', win32: 'nsis' }[process.platform];
   if (!bundle) {
-    console.error('Copick Tauri packaging supports only macOS and Windows.');
+    console.error('Copick packaging supports only macOS and Windows.');
     process.exit(1);
   }
   args.push('--bundles', bundle);

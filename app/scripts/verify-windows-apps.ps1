@@ -17,8 +17,8 @@ $uia = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
 # 编译失败必须立刻停：否则会继续用上一次的旧驱动，测出来的结果和源码无关。
 if ($LASTEXITCODE -ne 0 -or !(Test-Path $driver)) { throw '真实应用兼容性驱动编译失败' }
 
-if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick-tauri-prototype.exe' }
-$configDir = Join-Path $env:APPDATA 'local.copick.tauri'
+if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick.exe' }
+$configDir = Join-Path $env:APPDATA 'local.copick'
 $configPath = Join-Path $configDir 'config.json'
 $configBackup = $null
 $haveBackup = Test-Path $configPath
@@ -156,7 +156,7 @@ try {
     }
 } finally {
     if ($targetProcess -and !$targetProcess.HasExited) { Stop-Process -Id $targetProcess.Id -Force -ErrorAction SilentlyContinue }
-    Get-Process copick-tauri-prototype -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process copick -ErrorAction SilentlyContinue | Stop-Process -Force
     if ($haveBackup) { [IO.File]::WriteAllText($configPath, $configBackup) }
     else { Remove-Item $configPath -Force -ErrorAction SilentlyContinue }
     if ($App -eq 'vscode') {

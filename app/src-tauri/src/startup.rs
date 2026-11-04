@@ -97,7 +97,7 @@ mod platform {
     use std::{fs, io::{ErrorKind, Write}, os::unix::fs::OpenOptionsExt,
         path::{Path, PathBuf}, process::Command};
 
-    const LABEL: &str = "local.copick.tauri";
+    const LABEL: &str = "local.copick";
 
     fn item_path() -> Result<PathBuf, String> {
         let home = std::env::var_os("HOME").map(PathBuf::from)
@@ -180,7 +180,7 @@ mod platform {
     const PARENT: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion";
     const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
     const FULL_KEY: &str = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
-    const NAME: &str = "CopickTauri";
+    const NAME: &str = "Copick";
 
     fn reg(args: &[&str]) -> Result<Output, String> {
         let root = std::env::var_os("SystemRoot").ok_or("无法确定 Windows 系统目录")?;

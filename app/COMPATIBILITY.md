@@ -1,4 +1,4 @@
-# Copick Tauri 兼容性矩阵
+# Copick 兼容性矩阵
 
 只记录 **Tauri 重构版** 的真机结果。Electron 版的记录在 [docs/COMPATIBILITY.md](../docs/COMPATIBILITY.md)，两者的取词引擎实现不同，结果不能互相继承。
 
@@ -29,7 +29,7 @@
 
 注意：`SetCursorPos` 产生的移动不会进入产品的低级鼠标钩子，拖动会被当成单击（`gesture=0`）。脚本必须用 `SendInput` 的绝对移动，这个坑在第一次运行时暴露过。
 
-这个驱动没有接入 CI，只在 OMEN 的交互桌面手动跑过，不是回归套件：它会写平台配置再还原，按进程名关掉正在运行的 VS Code 与 `copick-tauri-prototype`，VS Code 场景还会改 `%APPDATA%\Code\User\settings.json` 再写回——跑之前要确认这两处没有未保存的内容。它判定复制内容用的是「文档去空白后包含剪贴板文本」的包含关系，只能说明复制到了正确文档附近，不证明等于实际选区。
+这个驱动没有接入 CI，只在 OMEN 的交互桌面手动跑过，不是回归套件：它会写平台配置再还原，按进程名关掉正在运行的 VS Code 与 `copick`，VS Code 场景还会改 `%APPDATA%\Code\User\settings.json` 再写回——跑之前要确认这两处没有未保存的内容。它判定复制内容用的是「文档去空白后包含剪贴板文本」的包含关系，只能说明复制到了正确文档附近，不证明等于实际选区。
 
 macOS 用 `npm run verify:mac-textedit` / `npm run verify:mac-safari`（等价于 `node scripts/verify-macos-apps.cjs <app>`）。驱动把测试文字写进临时文件、用 `open -a` 交给目标应用，再按 AX 文档 URL 精确定位本次窗口（TextEdit 会保留上一次的窗口，不锁定就会在旧文档上拖选），最后用 `CGEventPost` 发真实拖选并调用产品的 `cp_capture_begin`。
 

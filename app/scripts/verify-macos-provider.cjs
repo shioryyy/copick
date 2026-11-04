@@ -25,7 +25,7 @@ const executable = path.join(bundle, 'MacOS/CopickFixture');
 const marker = name => path.join(output, name);
 
 function script(action, timeout = 5000) {
-  const result = spawnSync('osascript', ['-e', `tell application "System Events" to tell process "copick-tauri-prototype"
+  const result = spawnSync('osascript', ['-e', `tell application "System Events" to tell process "Copick"
 ${action}
 end tell`], { encoding: 'utf8', timeout });
   assert.ifError(result.error);

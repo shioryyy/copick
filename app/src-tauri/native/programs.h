@@ -10,7 +10,7 @@ namespace copick {
  *
  * The engine lowercases the foreground program name and checks whether it contains
  * any entry, so entries are lowercase fragments rather than exact matches: "copick"
- * also covers "copick-tauri-prototype.exe". Terminals, credential prompts and
+ * also covers "copick.exe" / "Copick.exe". Terminals, credential prompts and
  * password managers are excluded so a popup never appears next to a password field
  * or a command line. Keep this aligned with the Electron build's PROTECTED list.
  *

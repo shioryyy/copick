@@ -29,7 +29,7 @@ int main() {
     for (const char *name : {"windowsterminal.exe", "windowsterminalpreview.exe", "cmd.exe",
         "powershell.exe", "powershell_ise.exe", "pwsh.exe", "conhost.exe", "openconsole.exe",
         "wsl.exe", "wslhost.exe", "mintty.exe", "putty.exe", "credentialuibroker.exe",
-        "logonui.exe", "copick-tauri-prototype.exe", "1password.exe", "Bitwarden.exe"})
+        "logonui.exe", "copick.exe", "1password.exe", "Bitwarden.exe"})
         assert(Matches(protectedList, name));
     assert(!Matches(protectedList, "notepad.exe"));
     assert(!Matches(protectedList, "word.exe"));
