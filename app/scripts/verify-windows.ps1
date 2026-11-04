@@ -26,7 +26,7 @@ $automation = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
 if ($LASTEXITCODE -ne 0) { throw 'Windows 验证驱动编译失败' }
 $app = $null
 # 回退场景必须显式固定开关：Windows 平台默认已开启回退，只靠缺省值无法覆盖 disabled 分支。
-$configDir = Join-Path $env:APPDATA 'local.copick.tauri'
+$configDir = Join-Path $env:APPDATA 'local.copick'
 $configPath = Join-Path $configDir 'config.json'
 $configBackup = $null
 $configTouched = $false
@@ -43,7 +43,7 @@ if (!$PrototypePid -and $Scenario -in @('fallback', 'fallback-disabled')) {
     $configTouched = $true
 }
 if (!$PrototypePid) {
-    if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick-tauri-prototype.exe' }
+    if (!$Executable) { $Executable = Join-Path $root 'src-tauri\target\release\copick.exe' }
     if (!$LogPath) { $LogPath = Join-Path $artifacts ("prototype-$Scenario-" + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '.log') }
     $env:COPICK_PROTOTYPE_LOG = $LogPath
     # 不带 --background 时设置窗口会在启动后打开并可能抢走前台，

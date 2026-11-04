@@ -429,7 +429,7 @@ class CopickFixture : Form {
                         alternate.Activate();
                         SetForegroundWindow(alternate.Handle);
                     } else {
-                        foreach (Process app in Process.GetProcessesByName("copick-tauri-prototype")) if (app.Id == appPid) SetForegroundWindow(app.MainWindowHandle);
+                        foreach (Process app in Process.GetProcessesByName("copick")) if (app.Id == appPid) SetForegroundWindow(app.MainWindowHandle);
                     }
                     bool changed = !SourceFocused();
                     report["foregroundChanged"] = changed;

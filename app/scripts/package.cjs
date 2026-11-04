@@ -10,7 +10,7 @@ const config = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri', 'tauri.co
 const release = path.join(root, 'src-tauri', 'target', 'release');
 const artifacts = path.join(root, 'artifacts');
 const output = path.join(artifacts, 'release');
-const binaryName = 'copick-tauri-prototype';
+const binaryName = 'copick';
 
 function requirePath(file, directory = false) {
   const stat = fs.statSync(file);
@@ -60,8 +60,8 @@ function main() {
   if (process.argv.length !== 2 || process.env.CARGO_TARGET_DIR || process.env.CARGO_BUILD_TARGET) {
     throw new Error('Package expects the default native release build in src-tauri/target/release; custom target directories, build targets and package arguments are unsupported.');
   }
-  if (config.productName !== 'Copick Tauri' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(config.version)) {
-    throw new Error('Expected productName Copick Tauri and a valid version in tauri.conf.json.');
+  if (config.productName !== 'Copick' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(config.version)) {
+    throw new Error('Expected productName Copick and a valid version in tauri.conf.json.');
   }
 
   fs.mkdirSync(artifacts, { recursive: true });
@@ -72,11 +72,15 @@ function main() {
     const names = [];
     const version = config.version;
     if (platform === 'darwin') {
+      // DMG 由 `npm run build` 一并生成，这里只核对它对应的 .app 并收进产物目录。
       const app = requirePath(path.join(release, 'bundle', 'macos', `${config.productName}.app`), true);
       requirePath(path.join(app, 'Contents', 'Resources', 'NOTICE-selection-hook.txt'));
       smokeTest(requirePath(path.join(app, 'Contents', 'MacOS', binaryName)), { portable: false });
-      const name = `Copick-Tauri-${version}-mac-arm64.zip`;
-      run('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, path.join(packages, name)]);
+      const dmgDirectory = path.join(release, 'bundle', 'dmg');
+      const dmgs = fs.readdirSync(dmgDirectory).filter(file => file.toLowerCase().endsWith('.dmg'));
+      if (dmgs.length !== 1) throw new Error(`Expected exactly one DMG in ${dmgDirectory}; clean old bundles and rebuild.`);
+      const name = `Copick-${version}-mac-arm64.dmg`;
+      fs.copyFileSync(requirePath(path.join(dmgDirectory, dmgs[0])), path.join(packages, name));
       names.push(name);
     } else {
       const installers = path.join(release, 'bundle', 'nsis');
@@ -93,11 +97,11 @@ function main() {
       const data = path.join(portable, 'data');
       fs.mkdirSync(data);
       fs.writeFileSync(path.join(data, 'README.txt'),
-        '这个目录存在时，Copick Tauri 以便携模式运行，config.json 和 logs/ 都写在这里。\n' +
+        '这个目录存在时，Copick 以便携模式运行，config.json 和 logs/ 都写在这里。\n' +
         '删掉整个 data 目录，程序会改回使用系统的用户配置目录。\n', 'utf8');
       smokeTest(executable, { portable: true });
-      const zip = `Copick-Tauri-${version}-win-x64.zip`;
-      const setup = `Copick-Tauri-Setup-${version}-win-x64.exe`;
+      const zip = `Copick-${version}-win-x64.zip`;
+      const setup = `Copick-Setup-${version}-win-x64.exe`;
       zipWindows(portable, path.join(packages, zip));
       fs.copyFileSync(installer, path.join(packages, setup));
       names.push(zip, setup);
@@ -111,7 +115,7 @@ function main() {
     fs.rmSync(output, { recursive: true, force: true });
     fs.renameSync(packages, output);
     console.log(`Release artifacts: ${output}\n${sums}`);
-    console.log('Signing is not performed by this script. Default builds have no trusted code signature; macOS builds are not notarized. Configure and verify signing separately before claiming otherwise.');
+    console.log('Signing is not performed by this script. Default builds have no trusted code signature; macOS DMGs are not notarized. Configure and verify signing separately before claiming otherwise.');
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }

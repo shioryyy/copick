@@ -127,7 +127,7 @@ static NSDictionary *Popup() {
     for (NSDictionary *window in windows) {
         NSString *owner = window[(NSString *)kCGWindowOwnerName];
         NSDictionary *bounds = window[(NSString *)kCGWindowBounds];
-        if (([owner containsString:@"copick-tauri"] || [owner containsString:@"Copick Tauri"]) &&
+        if ([owner containsString:@"Copick"] &&
             [bounds[@"Width"] doubleValue] == 88 && [bounds[@"Height"] doubleValue] == 40) {
             found = [[window retain] autorelease]; break;
         }

@@ -4,16 +4,16 @@
 
 - 纯本地运行：无网络请求、无 AI、无遥测，不保存选中文字。
 - Tauri 2 + Rust + 原生取词引擎，宿主系统 WebView，支持 macOS arm64 与 Windows x64。
-- Windows 提供 NSIS 安装版（按用户安装，无需管理员）和便携 ZIP；macOS 提供 ZIP。两端都可在设置中开启登录后自动启动。
+- Windows 提供 NSIS 安装版（按用户安装，无需管理员）和便携 ZIP；macOS 提供 DMG（拖入“应用程序”即安装）。两端都可在设置中开启登录后自动启动。
 
 ## 下载
 
-Tauri 版还没有发布过正式 Release：[Releases](https://github.com/shioryyy/copick/releases) 里现有的包是旧的 Electron 版，不再更新，别下。现在拿包有两条路：推 `v<版本>` 标签后，CI 会自动把两平台产物发到 Releases；否则在 Actions 的 **Tauri packages** 运行里下载 `copick-tauri-mac-arm64` / `copick-tauri-win-x64` 附件，解开外层 ZIP 后按 [app/RELEASE.md](app/RELEASE.md) 校验与安装。
+从 [Releases](https://github.com/shioryyy/copick/releases) 下载最新版本的 `Copick-<版本>-mac-arm64.dmg`、`Copick-<版本>-win-x64.zip`（便携）或 `Copick-Setup-<版本>-win-x64.exe`（安装版），同目录的 `SHA256SUMS.txt` 是它们的校验值。想自己构建或看未发布的产物，去 Actions 的 **Tauri packages** 运行里下载 `copick-mac-arm64` / `copick-win-x64` 附件，解开外层 ZIP 后按 [app/RELEASE.md](app/RELEASE.md) 校验与安装。v0.3.0-beta.2 及更早的包是旧的 Electron 版，不要再用。
 
 产物未代码签名，第一次运行时系统会拦一次，按下面放行即可（只需要做一次）：
 
-- **Windows**：运行 `copick-tauri-prototype.exe` 或安装包时，SmartScreen 显示「Windows 已保护你的电脑」。点「更多信息」→「仍要运行」。便携 ZIP 解压出来的文件带 Mark-of-the-Web，所以第一次一定会有这一步；安装版还会多一次 UAC 的「未知发布者」确认。
-- **macOS**：解压后在「访达」里**右键 → 打开**（不要双击），在提示里再点「打开」。或者执行 `xattr -dr com.apple.quarantine "Copick Tauri.app"`。不要为此关闭 Gatekeeper。
+- **Windows**：运行 `copick.exe` 或安装包时，SmartScreen 显示「Windows 已保护你的电脑」。点「更多信息」→「仍要运行」。便携 ZIP 解压出来的文件带 Mark-of-the-Web，所以第一次一定会有这一步；安装版还会多一次 UAC 的「未知发布者」确认。
+- **macOS**：双击 DMG，把 `Copick.app` 拖进“应用程序”；第一次打开时在「访达」里**右键 → 打开**（不要双击），在提示里再点「打开」。也可以执行 `xattr -dr com.apple.quarantine /Applications/Copick.app`。不要为此关闭 Gatekeeper。
 
 这跟包有没有损坏无关，只是没有向微软和苹果买证书。买了证书也只能少一次提示，换不来别的。
 
@@ -56,9 +56,9 @@ macOS 首次使用需要在系统设置中授予辅助功能权限，可从设�
 
 应用以单实例运行，重复启动会打开已有实例的设置页。关闭设置窗口后仍在系统托盘常驻，可从托盘暂停、恢复、打开设置或退出。
 
-设置保存在 Tauri 应用标识 `local.copick.tauri` 对应的独立配置目录：Windows 为 `%APPDATA%\local.copick.tauri`，macOS 为 `~/Library/Application Support/local.copick.tauri`。诊断日志默认关闭，可在设置页开启并打开日志文件夹。
+设置保存在 Tauri 应用标识 `local.copick` 对应的独立配置目录：Windows 为 `%APPDATA%\local.copick`，macOS 为 `~/Library/Application Support/local.copick`。诊断日志默认关闭，可在设置页开启并打开日志文件夹。
 
-**便携模式**：程序旁边（macOS 是 `Copick Tauri.app` 旁边）有 `data` 目录时，配置与日志写进这个目录，整个文件夹拷到别的机器能接着用。Windows 的便携 ZIP 自带 `data`，解压即可；安装版没有该目录，用系统配置目录。macOS 想便携就在 `.app` 旁边自己建一个 `data` 目录。删掉 `data` 就恢复系统配置目录，原来的配置不会自动搬过去。
+**便携模式**：程序旁边（macOS 是 `Copick.app` 旁边）有 `data` 目录时，配置与日志写进这个目录，整个文件夹拷到别的机器能接着用。Windows 的便携 ZIP 自带 `data`，解压即可；安装版没有该目录，用系统配置目录。macOS 想便携就在 `.app` 旁边自己建一个 `data` 目录。删掉 `data` 就恢复系统配置目录，原来的配置不会自动搬过去。
 
 ## 当前支持范围
 
@@ -68,7 +68,7 @@ macOS 通过 Accessibility（AX）读取选区，Windows 使用 UI Automation（
 
 ## 安全边界
 
-设置页只加载本地页面，CSP 禁止外部脚本、样式与连接；应用无网络请求、无选中文字历史。诊断日志默认关闭，可写的内容由固定 schema 白名单约束：事件名、请求序号、固定枚举的原因和压缩后的程序 token，不接纳窗口标题、路径或选中文字。日志位于配置目录下的 `logs/selection.log`：Windows 为 `%APPDATA%\local.copick.tauri\logs`，macOS 为 `~/Library/Application Support/local.copick.tauri/logs`。
+设置页只加载本地页面，CSP 禁止外部脚本、样式与连接；应用无网络请求、无选中文字历史。诊断日志默认关闭，可写的内容由固定 schema 白名单约束：事件名、请求序号、固定枚举的原因和压缩后的程序 token，不接纳窗口标题、路径或选中文字。日志位于配置目录下的 `logs/selection.log`：Windows 为 `%APPDATA%\local.copick\logs`，macOS 为 `~/Library/Application Support/local.copick/logs`。
 
 ## 许可
 

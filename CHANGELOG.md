@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-04
+
+### 变更
+
+- 改名：产品名从 “Copick Tauri” 改为 **Copick**，可执行文件从 `copick-tauri-prototype` 改为 `copick`，应用标识从 `local.copick.tauri` 改为 `local.copick`。配置目录随之变为 `%APPDATA%\local.copick`（Windows）与 `~/Library/Application Support/local.copick`（macOS），旧设置不会自动迁移；macOS 需要重新授予辅助功能权限。
+- macOS 改为发布 DMG（内含 `Copick.app` 与“应用程序”快捷方式），不再发布 ZIP。
+- 产物统一命名为 `Copick-<版本>-…`；Windows 的 NSIS 安装目录与登录启动项名称改为 `Copick`。
+
 ## [0.4.0] - 2026-11-03
 
 Tauri 版接过 Electron 版成为唯一实现后的第一个正式版本。
@@ -76,7 +84,8 @@ Tauri 版接过 Electron 版成为唯一实现后的第一个正式版本。
 - 未签名、未公证，无安装器与自动更新。
 - 底层库没有只读前台身份接口，非键鼠触发的前台切换可能在超时前留下旧浮窗。
 
-[Unreleased]: https://github.com/shioryyy/copick/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/shioryyy/copick/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/shioryyy/copick/releases/tag/v0.5.0
 [0.4.0]: https://github.com/shioryyy/copick/releases/tag/v0.4.0
 [0.3.0-beta.2]: https://github.com/shioryyy/copick/releases/tag/v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/shioryyy/copick/releases/tag/v0.3.0-beta.1

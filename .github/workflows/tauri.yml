@@ -34,12 +34,12 @@ jobs:
             label: macOS arm64
             platform: darwin
             arch: arm64
-            artifact: copick-tauri-mac-arm64
+            artifact: copick-mac-arm64
           - os: windows-latest
             label: Windows x64 MSVC
             platform: win32
             arch: x64
-            artifact: copick-tauri-win-x64
+            artifact: copick-win-x64
     steps:
       - uses: actions/checkout@v7
 
@@ -124,7 +124,7 @@ jobs:
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
-          $targets = @(Get-ChildItem 'app/src-tauri/target/release/copick-tauri-prototype.exe')
+          $targets = @(Get-ChildItem 'app/src-tauri/target/release/copick.exe')
           $targets += @(Get-ChildItem 'app/src-tauri/target/release/bundle/nsis/*.exe')
           foreach ($file in $targets) {
             & $signtool.FullName sign /f $pfx /p $env:WIN_CSC_KEY_PASSWORD /fd sha256 /td sha256 `
@@ -161,7 +161,7 @@ jobs:
           echo 'Windows installer checks cover silent install, the launch-at-login toggle, reinstalling over an existing install, and uninstall.' >> "$GITHUB_STEP_SUMMARY"
           echo 'macOS installation and accessibility permission checks remain manual.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Tauri release artifacts
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
@@ -194,7 +194,7 @@ jobs:
       - name: Download both platform packages
         uses: actions/download-artifact@v7
         with:
-          pattern: copick-tauri-*
+          pattern: copick-*
           path: packages
 
       # 两个平台各有自己的 SHA256SUMS.txt，合并成一份再逐个校验，避免同名文件互相覆盖。

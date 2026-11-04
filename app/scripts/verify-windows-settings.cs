@@ -31,7 +31,7 @@ static class SettingsCloseCheck
         var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
-            foreach (Process process in Process.GetProcessesByName("copick-tauri-prototype"))
+            foreach (Process process in Process.GetProcessesByName("copick"))
             {
                 if (process.Id != pid) continue;
                 process.Refresh();

@@ -11,14 +11,14 @@ if (!$Installer) {
     # 优先用 package.cjs 产出的发布包；没有就退回构建目录里的原始安装器。
     $packaged = Join-Path $artifacts 'release'
     if (Test-Path $packaged) {
-        $Installer = (Get-ChildItem $packaged -Filter 'Copick-Tauri-Setup-*.exe' | Select-Object -First 1).FullName
+        $Installer = (Get-ChildItem $packaged -Filter 'Copick-Setup-*.exe' | Select-Object -First 1).FullName
     }
     if (!$Installer) {
         $Installer = (Get-ChildItem (Join-Path $root 'src-tauri\target\release\bundle\nsis') -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
     }
 }
 if (!$Installer -or !(Test-Path $Installer)) { throw '找不到 NSIS 安装包；先运行 npm run build 或 npm run package' }
-if (!$InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'CopickTauriInstallCheck' }
+if (!$InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'CopickInstallCheck' }
 
 $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $driver = Join-Path $artifacts 'InstallerCheck.exe'

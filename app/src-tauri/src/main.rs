@@ -1010,7 +1010,7 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("无法构建 Tauri 原型")
+        .expect("无法构建设置窗口")
         .run(|_, event| { if matches!(event, tauri::RunEvent::Exit) { unsafe { cp_stop(); } } });
 }
 
