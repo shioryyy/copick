@@ -16,7 +16,7 @@
     "verify:mac-safari": "node scripts/verify-macos-apps.cjs safari"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.4"
+    "@tauri-apps/cli": "2.12.5"
   },
   "dependencies": {
     "selection-hook": "2.1.1"
